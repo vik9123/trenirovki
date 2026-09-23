@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { tonnage } from '../src/logic/tonnage';
-import { formatKg, formatDuration } from '../src/lib/format';
+import { formatKg, formatDuration, plural } from '../src/lib/format';
 
 describe('тоннаж', () => {
   test('пример из листа «Как вести»: 24×10 + 24×9 + 24×8 + 24×8 = 840', () => {
@@ -39,5 +39,14 @@ describe('форматирование', () => {
     expect(formatDuration(0)).toBe('0:00');
     expect(formatDuration(65_000)).toBe('1:05');
     expect(formatDuration(3_725_000)).toBe('1:02:05');
+  });
+});
+
+describe('склонение', () => {
+  test.each([
+    [1, '1 подход'], [2, '2 подхода'], [5, '5 подходов'], [11, '11 подходов'],
+    [21, '21 подход'], [24, '24 подхода'], [25, '25 подходов'], [112, '112 подходов'],
+  ])('%i', (n, s) => {
+    expect(plural(n, ['подход', 'подхода', 'подходов'])).toBe(s);
   });
 });

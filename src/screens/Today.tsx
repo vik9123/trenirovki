@@ -2,11 +2,12 @@ import { useState } from 'preact/hooks';
 import * as repo from '../data/repo';
 import { DAYS, getDay, type DayId } from '../program';
 import { plannedSets, suggestDay, weekLabel, WEEKS } from '../logic/cycle';
-import { formatKg } from '../lib/format';
+import { formatKg, plural } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 import { go } from '../router';
 
 const BACKUP_EVERY_MS = 7 * 86_400_000;
+const SETS: [string, string, string] = ['подход', 'подхода', 'подходов'];
 
 async function load() {
   const cycle = await repo.getActiveCycle();
@@ -107,7 +108,7 @@ export function Today() {
               <span style="display:flex;flex-direction:column;line-height:1.2">
                 <span>Начать: {getDay(next).title}</span>
                 <span style="font-size:13px;font-weight:600;opacity:.75">
-                  {getDay(next).slots.length} упражнений · {setsFor(next)} подходов
+                  {plural(getDay(next).slots.length, ['упражнение', 'упражнения', 'упражнений'])} · {plural(setsFor(next), SETS)}
                 </span>
               </span>
             </button>
@@ -126,7 +127,7 @@ export function Today() {
               ? 'Идёт'
               : cycle.finishedAt
                 ? '—'
-                : `${setsFor(d.id)} подходов`;
+                : plural(setsFor(d.id), SETS);
           return (
             <button
               class={`day ${state}`}
