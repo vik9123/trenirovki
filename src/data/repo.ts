@@ -4,6 +4,7 @@ import { isDeload, plannedSets, WEEKS } from '../logic/cycle';
 import { DEFAULT_STEPS, suggest, type Past, type Suggestion } from '../logic/progression';
 import { tonnage } from '../logic/tonnage';
 import { isoDate } from '../lib/format';
+import { SCHEMA_VERSION, type Backup } from '../logic/backup';
 
 // ---------- настройки ----------
 
@@ -163,11 +164,12 @@ export async function startSession(dayId: DayId, now = new Date()): Promise<numb
     date: isoDate(now),
     startedAt: now.getTime(),
   };
-  session.id = await db.sessions.add(session);
+  const id = (await db.sessions.add(session)) as number;
+  session.id = id;
   for (const slot of getDay(dayId).slots) {
     await createSlotRows(session, cycle, slot.id, await lastKeyForSlot(slot.id));
   }
-  return session.id;
+  return id;
 }
 
 export async function suggestionFor(sessionId: number, slotId: string): Promise<Suggestion> {
@@ -309,3 +311,33 @@ export async function weeklySummary(cycleId: number): Promise<WeekSummary[]> {
 }
 
 export type { CycleRow, SessionRow, SetRow, SkipRow, BodyweightRow, SettingsRow };
+
+// ---------- резервная копия ----------
+
+export async function exportBackup(now = new Date()): Promise<Backup> {
+  return {
+    app: 'trenirovki',
+    schemaVersion: SCHEMA_VERSION,
+    exportedAt: now.toISOString(),
+    cycles: await db.cycles.toArray(),
+    sessions: await db.sessions.toArray(),
+    sets: await db.sets.toArray(),
+    skips: await db.skips.toArray(),
+    bodyweight: await db.bodyweight.toArray(),
+    settings: (await db.settings.get('main')) ?? null,
+  };
+}
+
+/** Заменяет все данные содержимым копии. */
+export async function importBackup(b: Backup): Promise<void> {
+  const tables = [db.cycles, db.sessions, db.sets, db.skips, db.bodyweight, db.settings];
+  await db.transaction('rw', tables, async () => {
+    for (const t of tables) await t.clear();
+    await db.cycles.bulkAdd(b.cycles);
+    await db.sessions.bulkAdd(b.sessions);
+    await db.sets.bulkAdd(b.sets);
+    await db.skips.bulkAdd(b.skips);
+    await db.bodyweight.bulkAdd(b.bodyweight);
+    if (b.settings) await db.settings.put(b.settings);
+  });
+}
