@@ -10,6 +10,10 @@ export interface Exercise {
   name: string;
   equipment: Equipment;
   technique?: string;
+  /** Повторения — на каждую ногу (руку), вес — одной гантели. */
+  perSide?: boolean;
+  /** Первые N тренировок с упражнением — без отягощения. */
+  bodyweightFirst?: number;
 }
 
 export interface Slot {
@@ -52,11 +56,14 @@ const AMPLITUDE =
 
 const T = {
   squat:
-    'В силовой раме с выставленными страховочными упорами. До параллели бедра, не ниже. Вес — около 70 % от того, что идёт в Смите.',
+    'В силовой раме с выставленными страховочными упорами. До параллели бедра, не ниже. Первые тренировки — вес с запасом, прибавлять по 5 кг.',
+  stepUp:
+    'Тумба 30-40 см, так чтобы угол в колене внизу был не меньше 90°. Поднимаетесь за счёт ноги на тумбе, нижней не отталкиваетесь. Колено идёт по линии носка. Первые две недели без гантелей. Вес — одной гантели (0 без веса), повторения — на одну ногу.',
+  singleLegRdl:
+    'Первое время держитесь свободной рукой за стойку, гантель 10-12 кг. Спина прямая, таз назад, опорное колено слегка согнуто и не двигается. Вес — одной гантели, повторения — на одну ногу.',
   dips: 'Не опускаться ниже 90° в локте. Записывайте только дополнительный вес, 0 — без веса.',
   pullups: 'Записывайте только дополнительный вес, 0 — без веса.',
   uprightRow: 'Хват шире плеч. Локти останавливаются на уровне плеч, не выше.',
-  rdl: 'Стопы поставить так, чтобы гриф шёл вплотную вдоль ног.',
   seatedRow: 'Корпус зафиксирован, тянуть локтями назад, в конце свести лопатки.',
   tbar: 'Если заноет поясница — заменить на тягу гантели в упоре одной рукой (кнопка «Заменить»).',
   farmer:
@@ -74,7 +81,12 @@ type Row = [
   restSec: number,
   equipment: Equipment,
   technique?: string,
-  extra?: Partial<Pick<Slot, 'unit' | 'countsTonnage' | 'skippable'>> & { substitute?: Omit<Exercise, 'key'> },
+  extra?: Partial<Pick<Slot, 'unit' | 'countsTonnage' | 'skippable'>> &
+    Pick<Exercise, 'perSide' | 'bodyweightFirst'> & {
+      /** Свой ключ истории, если упражнение сменилось в слоте (иначе ключ = id слота). */
+      key?: string;
+      substitute?: Omit<Exercise, 'key'>;
+    },
 ];
 
 function day(id: DayId, title: string, short: string, kind: Day['kind'], note: string, rows: Row[]): Day {
@@ -84,7 +96,14 @@ function day(id: DayId, title: string, short: string, kind: Day['kind'], note: s
       id: slotId,
       day: id,
       order: i + 1,
-      exercise: { key: slotId, name, equipment, ...(technique ? { technique } : {}) },
+      exercise: {
+        key: extra?.key ?? slotId,
+        name,
+        equipment,
+        ...(technique ? { technique } : {}),
+        ...(extra?.perSide ? { perSide: true } : {}),
+        ...(extra?.bodyweightFirst ? { bodyweightFirst: extra.bodyweightFirst } : {}),
+      },
       sets,
       repMin,
       repMax,
@@ -117,8 +136,9 @@ export const DAYS: Day[] = [
     ['Гиперэкстензия', 4, 12, 12, 45, 'added', T.hyper],
   ]),
   day('tue', 'Вторник — низ, лёгкий', 'Вт', 'light', LIGHT_NOTE, [
-    ['Приседания в Смите', 4, 12, 15, 90, 'smith'],
-    ['Румынская тяга в Смите', 4, 12, 15, 90, 'smith', T.rdl],
+    // С 24.09.2026 вместо приседаний и румынской тяги в Смите (см. RETIRED).
+    ['Боковой подъём на тумбу', 4, 10, 12, 75, 'dumbbell', T.stepUp, { key: 'tue-stepup', perSide: true, bodyweightFirst: 2 }],
+    ['Румынская тяга на одной ноге', 4, 10, 12, 75, 'dumbbell', T.singleLegRdl, { key: 'tue-sl-rdl', perSide: true }],
     ['Жим ногами', 3, 15, 20, 75, 'machine'],
     ['Сгибание ног лёжа', 4, 15, 15, 45, 'machine'],
     ['Подъёмы на носки стоя', 4, 15, 20, 45, 'machine'],
@@ -147,7 +167,27 @@ export const DAYS: Day[] = [
   ]),
 ];
 
+/**
+ * Упражнения, убранные из программы. Их записи в журнале остаются и показываются в истории,
+ * но не становятся «прошлым разом» для упражнений, пришедших им на смену.
+ */
+export const RETIRED: { slotId: string; exercise: Exercise; until: string }[] = [
+  { slotId: 'tue-1', until: '2026-09-24', exercise: { key: 'tue-1', name: 'Приседания в Смите', equipment: 'smith' } },
+  {
+    slotId: 'tue-2',
+    until: '2026-09-24',
+    exercise: { key: 'tue-2', name: 'Румынская тяга в Смите', equipment: 'smith', technique: 'Стопы поставить так, чтобы гриф шёл вплотную вдоль ног.' },
+  },
+];
+
 const SLOTS = new Map(DAYS.flatMap((d) => d.slots).map((s) => [s.id, s]));
+
+const EXERCISES = new Map<string, { slot: Slot; exercise: Exercise; retired: boolean }>();
+for (const slot of SLOTS.values()) {
+  EXERCISES.set(slot.exercise.key, { slot, exercise: slot.exercise, retired: false });
+  if (slot.substitute) EXERCISES.set(slot.substitute.key, { slot, exercise: slot.substitute, retired: false });
+}
+for (const r of RETIRED) EXERCISES.set(r.exercise.key, { slot: SLOTS.get(r.slotId)!, exercise: r.exercise, retired: true });
 
 export function getDay(id: DayId): Day {
   const d = DAYS.find((x) => x.id === id);
@@ -161,9 +201,13 @@ export function getSlot(id: string): Slot {
   return s;
 }
 
-export function exerciseByKey(key: string): { slot: Slot; exercise: Exercise } {
-  const slot = getSlot(key.split('~')[0]);
-  if (slot.exercise.key === key) return { slot, exercise: slot.exercise };
-  if (slot.substitute?.key === key) return { slot, exercise: slot.substitute };
-  throw new Error(`Нет упражнения ${key}`);
+export function exerciseByKey(key: string): { slot: Slot; exercise: Exercise; retired: boolean } {
+  const e = EXERCISES.get(key);
+  if (!e) throw new Error(`Нет упражнения ${key}`);
+  return e;
+}
+
+/** Упражнение из действующей программы для этого слота: основное или замена. */
+export function isCurrentKey(slot: Slot, key: string): boolean {
+  return slot.exercise.key === key || slot.substitute?.key === key;
 }

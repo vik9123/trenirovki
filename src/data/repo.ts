@@ -1,5 +1,5 @@
 import { db, type Back, type BodyweightRow, type CycleRow, type SessionRow, type SetRow, type SettingsRow, type SkipRow } from './db';
-import { DAYS, exerciseByKey, getDay, getSlot, type DayId } from '../program';
+import { DAYS, exerciseByKey, getDay, getSlot, isCurrentKey, type DayId } from '../program';
 import { isDeload, plannedSets, WEEKS } from '../logic/cycle';
 import { DEFAULT_STEPS, suggest, type Past, type Suggestion } from '../logic/progression';
 import { tonnage } from '../logic/tonnage';
@@ -79,20 +79,31 @@ function bySlotThenIndex(a: SetRow, b: SetRow) {
 }
 
 /**
+ * Завершённые тренировки с упражнением, раньше данной (если указана), по возрастанию времени.
+ * includeDeload — учитывать ли неделю разгрузки.
+ */
+async function pastSessions(exerciseKey: string, beforeSessionId: number | undefined, includeDeload: boolean) {
+  const rows = await db.sets.where({ exerciseKey }).toArray();
+  if (!rows.length) return { rows, sessions: [] as SessionRow[] };
+  const before = beforeSessionId ? await db.sessions.get(beforeSessionId) : undefined;
+  const ids = [...new Set(rows.map((r) => r.sessionId))];
+  const sessions = (await db.sessions.bulkGet(ids))
+    .filter(
+      (s): s is SessionRow =>
+        !!s && !!s.finishedAt && (includeDeload || !isDeload(s.week)) && s.id !== beforeSessionId && (!before || s.startedAt < before.startedAt),
+    )
+    .sort((a, b) => a.startedAt - b.startedAt);
+  return { rows, sessions };
+}
+
+/**
  * Прошлый раз для упражнения: последняя завершённая тренировка с ним,
  * кроме недели разгрузки. before — считать «прошлым» только то, что было раньше этой тренировки.
  */
 export async function lastPast(exerciseKey: string, beforeSessionId?: number): Promise<{ past: Past; week: number } | null> {
-  const rows = await db.sets.where({ exerciseKey }).toArray();
-  if (!rows.length) return null;
-  const before = beforeSessionId ? await db.sessions.get(beforeSessionId) : undefined;
-  const ids = [...new Set(rows.map((r) => r.sessionId))];
-  const sessions = (await db.sessions.bulkGet(ids)).filter(
-    (s): s is SessionRow =>
-      !!s && !!s.finishedAt && !isDeload(s.week) && s.id !== beforeSessionId && (!before || s.startedAt < before.startedAt),
-  );
-  if (!sessions.length) return null;
-  const last = sessions.reduce((a, b) => (b.startedAt > a.startedAt ? b : a));
+  const { rows, sessions } = await pastSessions(exerciseKey, beforeSessionId, false);
+  const last = sessions[sessions.length - 1];
+  if (!last) return null;
   const sets = rows
     .filter((r) => r.sessionId === last.id)
     .sort((a, b) => a.index - b.index)
@@ -100,10 +111,14 @@ export async function lastPast(exerciseKey: string, beforeSessionId?: number): P
   return { past: { sets }, week: last.week };
 }
 
-/** Какое упражнение слота делали в последний раз: основное или замену. */
+/**
+ * Какое упражнение слота делали в последний раз: основное или замену.
+ * Упражнения, убранные из программы, не возвращаются — берётся основное.
+ */
 async function lastKeyForSlot(slotId: string): Promise<string> {
-  const rows = await db.sets.where({ slotId }).toArray();
-  if (!rows.length) return slotId;
+  const slot = getSlot(slotId);
+  const rows = (await db.sets.where({ slotId }).toArray()).filter((r) => isCurrentKey(slot, r.exerciseKey));
+  if (!rows.length) return slot.exercise.key;
   const sessions = new Map(
     (await db.sessions.bulkGet([...new Set(rows.map((r) => r.sessionId))]))
       .filter((s): s is SessionRow => !!s?.finishedAt)
@@ -114,7 +129,7 @@ async function lastKeyForSlot(slotId: string): Promise<string> {
     const s = sessions.get(r.sessionId);
     if (s && (!best || s.startedAt > best.at)) best = { key: r.exerciseKey, at: s.startedAt };
   }
-  return best?.key ?? slotId;
+  return best?.key ?? slot.exercise.key;
 }
 
 async function suggestion(session: SessionRow, cycle: CycleRow, slotId: string, exerciseKey: string): Promise<Suggestion> {
@@ -123,6 +138,9 @@ async function suggestion(session: SessionRow, cycle: CycleRow, slotId: string, 
   const { exercise } = exerciseByKey(exerciseKey);
   const settings = await getSettings();
   const last = await lastPast(exerciseKey, session.id);
+  const intro = exercise.bodyweightFirst
+    ? (await pastSessions(exerciseKey, session.id, true)).sessions.length < exercise.bodyweightFirst
+    : false;
   return suggest({
     slot,
     kind: day.kind,
@@ -131,6 +149,7 @@ async function suggestion(session: SessionRow, cycle: CycleRow, slotId: string, 
     past: last?.past ?? null,
     deload: isDeload(session.week),
     steps: settings.steps,
+    bodyweightOnly: intro,
   });
 }
 
@@ -172,9 +191,27 @@ export async function startSession(dayId: DayId, now = new Date()): Promise<numb
   return id;
 }
 
+/**
+ * Незавершённая тренировка, начатая по прежней программе: упражнения, убранные из программы
+ * и ещё не начатые (ни одного отмеченного подхода), заменяются действующими.
+ */
+export async function refreshRetired(sessionId: number): Promise<boolean> {
+  const { session, sets } = await sessionBundle(sessionId);
+  if (session.finishedAt) return false;
+  let changed = false;
+  for (const slot of getDay(session.day).slots) {
+    const rows = sets.filter((r) => r.slotId === slot.id);
+    if (rows.length && !rows.some((r) => r.done) && exerciseByKey(rows[0].exerciseKey).retired) {
+      await replaceSlotRows(sessionId, slot.id, slot.exercise.key);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export async function suggestionFor(sessionId: number, slotId: string): Promise<Suggestion> {
   const { session, cycle, sets } = await sessionBundle(sessionId);
-  const key = sets.find((s) => s.slotId === slotId)?.exerciseKey ?? slotId;
+  const key = sets.find((s) => s.slotId === slotId)?.exerciseKey ?? getSlot(slotId).exercise.key;
   return suggestion(session, cycle, slotId, key);
 }
 

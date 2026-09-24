@@ -20,6 +20,7 @@ import { Stepper } from '../ui/Stepper';
 type Bundle = Awaited<ReturnType<typeof repo.sessionBundle>>;
 
 async function load(id: number) {
+  await repo.refreshRetired(id);
   const [bundle, settings] = await Promise.all([repo.sessionBundle(id), repo.getSettings()]);
   return { ...bundle, settings };
 }
@@ -88,7 +89,7 @@ export function Workout({ id }: { id: number }) {
   if (!data || !day || !slot) return <div class="screen" />;
 
   const { session, cycle, settings } = data;
-  const exercise = exerciseByKey(key).exercise;
+  const { exercise, retired } = exerciseByKey(key);
   const count = skipped ? plannedSets(day, slot, session.week, cycle.number) : rows.length;
   const last = idx >= day.slots.length - 1;
   const label = weekLabel(session.week, cycle.number);
@@ -160,13 +161,13 @@ export function Workout({ id }: { id: number }) {
         <div class="faint small" style="margin-bottom:4px">Упражнение {idx + 1} из {day.slots.length}</div>
         <h1>{exercise.name}</h1>
         <div class="ex-meta num">
-          <span>{count} × {range(slot)}</span>
+          <span>{count} × {range(slot)}{exercise.perSide ? ' на ногу' : ''}</span>
           <span>отдых {slot.restSec} с</span>
-          {exercise.key !== slot.exercise.key && <span>вместо: {slot.exercise.name}</span>}
+          {retired ? <span>прежняя программа</span> : exercise.key !== slot.exercise.key && <span>вместо: {slot.exercise.name}</span>}
         </div>
         <div class="ex-actions">
           {exercise.technique && <button class="btn" onClick={() => setTech(!tech)}>ℹ Техника</button>}
-          {slot.substitute && !skipped && (
+          {slot.substitute && !skipped && !retired && (
             <button class="btn" onClick={() => swap(exercise.key === slot.exercise.key)}>
               {exercise.key === slot.exercise.key ? `Заменить на «${slot.substitute.name}»` : `Вернуть «${slot.exercise.name}»`}
             </button>

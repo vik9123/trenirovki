@@ -211,4 +211,68 @@ describe('история и сводка', () => {
     const { sets } = await repo.sessionBundle(id);
     expect(sets.find((x) => x.slotId === 'mon-1')!.weight).toBe(21);
   });
+
+  test('программа сменилась: история Смита не становится «прошлым разом» для бокового подъёма', async () => {
+    // Вторник по старой программе: строки с ключами tue-1 / tue-2 (приседания и румынская тяга в Смите).
+    const cycle = await repo.getActiveCycle();
+    const oldId = (await db.sessions.add({ cycleId: cycle.id!, week: 1, day: 'tue', date: '2026-09-22', startedAt: tick(-6).getTime(), finishedAt: tick(0).getTime() })) as number;
+    for (const [slotId, w] of [['tue-1', 60], ['tue-2', 50]] as const) {
+      for (let i = 1; i <= 3; i++) {
+        await db.sets.add({ sessionId: oldId, slotId, exerciseKey: slotId, index: i, weight: w, value: 15, pain: false, done: true });
+      }
+    }
+    clock = new Date(2026, 8, 29, 10).getTime();
+    await repo.advanceWeek(cycle.id!);
+    const id = await repo.startSession('tue', tick(0));
+    const { sets } = await repo.sessionBundle(id);
+    const stepUp = sets.filter((s) => s.slotId === 'tue-1');
+    const slRdl = sets.filter((s) => s.slotId === 'tue-2');
+    expect(stepUp.map((s) => s.exerciseKey)).toEqual(['tue-stepup', 'tue-stepup', 'tue-stepup', 'tue-stepup']);
+    expect(stepUp.every((s) => s.weight === 0 && s.value === 10)).toBe(true);
+    expect(slRdl.every((s) => s.exerciseKey === 'tue-sl-rdl' && s.weight === 0)).toBe(true);
+    expect((await repo.suggestionFor(id, 'tue-1')).hint).toBe('Первые две недели — без гантелей');
+    expect((await repo.suggestionFor(id, 'tue-2')).hint).toBe('Калибровка: подберите рабочий вес');
+
+    // Старая тренировка по-прежнему открывается и считает тоннаж
+    const old = await repo.sessionBundle(oldId);
+    expect(old.sets.map((s) => s.exerciseKey)).toContain('tue-1');
+    expect(await repo.sessionTonnage(oldId)).toBe(60 * 15 * 3 + 50 * 15 * 3);
+    expect(await repo.exerciseHistory('tue-1')).toEqual([{ date: '2026-09-22', top: 60, total: 45 }]);
+  });
+
+  test('боковой подъём: две тренировки без гантелей, на третьей — обычная прогрессия', async () => {
+    const c = await repo.getActiveCycle();
+    const run = async (value: number) => {
+      const id = await repo.startSession('tue', tick(0));
+      const { sets } = await repo.sessionBundle(id);
+      for (const s of sets.filter((x) => x.slotId === 'tue-1')) await repo.updateSet(s.id!, { value, done: true });
+      await repo.finishSession(id, { wellbeing: 4, back: 'ok', note: '' }, tick(0));
+      await repo.advanceWeek(c.id!);
+      tick(7);
+      return id;
+    };
+    await run(12);
+    let id = await repo.startSession('tue', tick(0));
+    expect((await repo.suggestionFor(id, 'tue-1')).weight).toBe(0);
+    await repo.deleteSession(id);
+    await run(12);
+    id = await repo.startSession('tue', tick(0));
+    const s = await repo.suggestionFor(id, 'tue-1');
+    expect(s.weight).toBe(2);
+    expect(s.hint).toBe('Верх набран → +2 кг, назад к 10');
+  });
+
+  test('незавершённый вторник по старой программе переводится на новые упражнения', async () => {
+    const cycle = await repo.getActiveCycle();
+    const id = (await db.sessions.add({ cycleId: cycle.id!, week: 1, day: 'tue', date: '2026-09-23', startedAt: tick(0).getTime() })) as number;
+    await db.sets.bulkAdd([
+      { sessionId: id, slotId: 'tue-1', exerciseKey: 'tue-1', index: 1, weight: 40, value: 12, pain: false, done: false },
+      { sessionId: id, slotId: 'tue-2', exerciseKey: 'tue-2', index: 1, weight: 40, value: 12, pain: false, done: true },
+    ]);
+    expect(await repo.refreshRetired(id)).toBe(true);
+    const { sets } = await repo.sessionBundle(id);
+    expect(sets.filter((s) => s.slotId === 'tue-1').map((s) => s.exerciseKey)).toEqual(['tue-stepup', 'tue-stepup', 'tue-stepup']);
+    expect(sets.filter((s) => s.slotId === 'tue-2').map((s) => s.exerciseKey)).toEqual(['tue-2']); // уже начато — не трогаем
+    expect(await repo.refreshRetired(id)).toBe(false);
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { DAYS, exerciseByKey, getDay, getSlot } from '../src/program';
+import { DAYS, exerciseByKey, getDay, getSlot, isCurrentKey, RETIRED } from '../src/program';
 
-// Эталон — листы «Пн/Вт/Чт/Пт» файла «Дневник тренировок 2026-27.xlsx»
+// Эталон — листы «Пн/Вт/Чт/Пт» файла «Дневник тренировок 2026-27.xlsx» (редакция 24.09.2026)
 const EXCEL: Record<string, [string, number, number, number, number][]> = {
   mon: [
     ['Жим гантелей на наклонной 30°', 4, 8, 10, 105],
@@ -13,8 +13,8 @@ const EXCEL: Record<string, [string, number, number, number, number][]> = {
     ['Гиперэкстензия', 4, 12, 12, 45],
   ],
   tue: [
-    ['Приседания в Смите', 4, 12, 15, 90],
-    ['Румынская тяга в Смите', 4, 12, 15, 90],
+    ['Боковой подъём на тумбу', 4, 10, 12, 75],
+    ['Румынская тяга на одной ноге', 4, 10, 12, 75],
     ['Жим ногами', 3, 15, 20, 75],
     ['Сгибание ног лёжа', 4, 15, 15, 45],
     ['Подъёмы на носки стоя', 4, 15, 20, 45],
@@ -65,10 +65,39 @@ describe('программа', () => {
     expect(perDay.reduce((a, b) => a + b)).toBe(113);
   });
 
-  test('id слотов уникальны, ключ упражнения = id слота', () => {
+  test('id слотов и ключи упражнений уникальны, включая замены и прежние упражнения', () => {
     const ids = DAYS.flatMap((d) => d.slots.map((s) => s.id));
     expect(new Set(ids).size).toBe(ids.length);
-    DAYS.flatMap((d) => d.slots).forEach((s) => expect(s.exercise.key).toBe(s.id));
+    const keys = [
+      ...DAYS.flatMap((d) => d.slots.flatMap((s) => [s.exercise.key, ...(s.substitute ? [s.substitute.key] : [])])),
+      ...RETIRED.map((r) => r.exercise.key),
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
+    keys.forEach((k) => expect(exerciseByKey(k).exercise.key).toBe(k));
+  });
+
+  test('программа от 24.09: во вторник упражнения на одну ногу с новыми ключами', () => {
+    const stepUp = getSlot('tue-1');
+    const slRdl = getSlot('tue-2');
+    expect(stepUp.exercise).toMatchObject({ key: 'tue-stepup', equipment: 'dumbbell', perSide: true, bodyweightFirst: 2 });
+    expect(slRdl.exercise).toMatchObject({ key: 'tue-sl-rdl', equipment: 'dumbbell', perSide: true });
+    expect(slRdl.exercise.bodyweightFirst).toBeUndefined();
+    expect(stepUp.exercise.technique).toContain('Первые две недели без гантелей');
+  });
+
+  test('прежние упражнения вторника остаются в справочнике для истории', () => {
+    expect(RETIRED.map((r) => [r.exercise.key, r.exercise.name, r.slotId])).toEqual([
+      ['tue-1', 'Приседания в Смите', 'tue-1'],
+      ['tue-2', 'Румынская тяга в Смите', 'tue-2'],
+    ]);
+    const old = exerciseByKey('tue-1');
+    expect(old.retired).toBe(true);
+    expect(old.slot.id).toBe('tue-1');
+    expect(old.exercise.equipment).toBe('smith');
+    expect(exerciseByKey('tue-stepup').retired).toBe(false);
+    expect(isCurrentKey(getSlot('tue-1'), 'tue-1')).toBe(false);
+    expect(isCurrentKey(getSlot('tue-1'), 'tue-stepup')).toBe(true);
+    expect(isCurrentKey(getSlot('mon-4'), 'mon-4~sub')).toBe(true);
   });
 
   test('Т-гриф можно заменить на тягу гантели', () => {

@@ -71,19 +71,19 @@ describe('подсказка прогрессии', () => {
   });
 
   test('лёгкий день, верх не набран → держим вес, +1 повтор', () => {
-    const slot = getSlot('tue-1'); // 4 × 12-15
-    const s = suggest({ ...base, slot, kind: 'light', equipment: 'smith', count: 4, past: sets(40, [14, 13, 13, 12]) });
+    const slot = getSlot('thu-1'); // тяга вертикального блока 4 × 12-15
+    const s = suggest({ ...base, slot, kind: 'light', equipment: 'machine', count: 4, past: sets(40, [14, 13, 13, 12]) });
     expect(s.weight).toBe(40);
     expect(s.values).toEqual([14, 13, 13, 12]);
     expect(s.hint).toBe('Держим вес, +1 повтор');
   });
 
   test('лёгкий день, верх набран → + шаг, назад к нижней границе', () => {
-    const slot = getSlot('tue-1');
-    const s = suggest({ ...base, slot, kind: 'light', equipment: 'smith', count: 4, past: sets(40, [15, 15, 15, 16]) });
-    expect(s.weight).toBe(42.5);
+    const slot = getSlot('thu-1');
+    const s = suggest({ ...base, slot, kind: 'light', equipment: 'machine', count: 4, past: sets(40, [15, 15, 15, 16]) });
+    expect(s.weight).toBe(45);
     expect(s.values).toEqual([12, 12, 12, 12]);
-    expect(s.hint).toBe('Верх набран → +2,5 кг, назад к 12');
+    expect(s.hint).toBe('Верх набран → +5 кг, назад к 12');
   });
 
   test('прогулка фермера: 40 с во всех подходах → +2 кг, назад к 30 с', () => {
@@ -118,5 +118,23 @@ describe('подсказка прогрессии', () => {
     const s = suggest({ ...base, steps, slot, kind: 'heavy', equipment: 'dumbbell', count: 3, past: sets(30, [10, 10, 10]) });
     expect(s.weight).toBe(31);
     expect(s.hint).toBe('Верх набран → +1 кг');
+  });
+
+  test('боковой подъём: первые тренировки без гантелей — вес 0, повторения растут', () => {
+    const slot = getSlot('tue-1'); // 4 × 10-12, на ногу
+    const first = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 3, past: null, bodyweightOnly: true });
+    expect(first).toEqual({ weight: 0, values: [10, 10, 10], hint: 'Первые две недели — без гантелей', increased: false });
+    const second = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 4, past: sets(0, [12, 12, 12]), bodyweightOnly: true });
+    expect(second.weight).toBe(0);
+    expect(second.values).toEqual([12, 12, 12, 10]);
+    expect(second.hint).toBe('Первые две недели — без гантелей');
+  });
+
+  test('после вводных тренировок — обычное правило: верх набран → первая гантель', () => {
+    const slot = getSlot('tue-1');
+    const s = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 4, past: sets(0, [12, 12, 12, 12]) });
+    expect(s.weight).toBe(2);
+    expect(s.values).toEqual([10, 10, 10, 10]);
+    expect(s.hint).toBe('Верх набран → +2 кг, назад к 10');
   });
 });

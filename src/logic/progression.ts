@@ -38,6 +38,8 @@ export interface SuggestArgs {
   past: Past | null;
   deload: boolean;
   steps: Steps;
+  /** Вводные тренировки упражнения без отягощения (боковой подъём — первые две недели). */
+  bodyweightOnly?: boolean;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -48,8 +50,12 @@ const round = (n: number) => Math.round(n * 100) / 100;
  * лёгкий день — вес держим, растут повторения; дошли до верха → вес + шаг и назад к нижней границе.
  * В обоих случаях после повышения веса повторения начинаются с нижней границы.
  */
-export function suggest({ slot, kind, equipment, count, past, deload, steps }: SuggestArgs): Suggestion {
+export function suggest({ slot, kind, equipment, count, past, deload, steps, bodyweightOnly }: SuggestArgs): Suggestion {
   const floor = Array<number>(count).fill(slot.repMin);
+  if (bodyweightOnly) {
+    const values = floor.map((min, i) => (past?.sets[i]?.done ? past.sets[i].value : min));
+    return { weight: 0, values, hint: 'Первые две недели — без гантелей', increased: false };
+  }
   if (!past || !past.sets.some((s) => s.done)) {
     return { weight: 0, values: floor, hint: 'Калибровка: подберите рабочий вес', increased: false };
   }
