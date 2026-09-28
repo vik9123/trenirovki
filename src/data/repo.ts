@@ -1,5 +1,5 @@
-import { db, type Back, type BodyweightRow, type CycleRow, type SessionRow, type SetRow, type SettingsRow, type SkipRow } from './db';
-import { DAYS, exerciseByKey, getDay, getSlot, isCurrentKey, type DayId } from '../program';
+import { db, normalizeSlotId, type Back, type BodyweightRow, type CycleRow, type SessionRow, type SetRow, type SettingsRow, type SkipRow } from './db';
+import { DAYS, exerciseByKey, getDay, getSlot, isCurrentKey, type DayId, type Slot } from '../program';
 import { isDeload, plannedSets, WEEKS } from '../logic/cycle';
 import { DEFAULT_STEPS, suggest, type Past, type Suggestion } from '../logic/progression';
 import { tonnage } from '../logic/tonnage';
@@ -72,10 +72,22 @@ export async function sessionBundle(id: number) {
   return { session, cycle, sets, skips };
 }
 
+/** Порядок упражнений: место в дне; убранное — после действующего с тем же местом. */
+function slotRank(s: Slot): number {
+  return s.order * 2 + (s.retiredAfter ? 1 : 0);
+}
+
 function bySlotThenIndex(a: SetRow, b: SetRow) {
-  const sa = getSlot(a.slotId).order;
-  const sb = getSlot(b.slotId).order;
-  return sa - sb || a.index - b.index;
+  return slotRank(getSlot(a.slotId)) - slotRank(getSlot(b.slotId)) || a.index - b.index;
+}
+
+/**
+ * Упражнения этой тренировки — по её записям и пропускам, а не по текущей программе:
+ * старая тренировка показывается так, как её делали.
+ */
+export function sessionSlots(b: { sets: SetRow[]; skips: SkipRow[] }): Slot[] {
+  const ids = new Set([...b.sets.map((s) => s.slotId), ...b.skips.map((s) => s.slotId)]);
+  return [...ids].map(getSlot).sort((x, y) => slotRank(x) - slotRank(y));
 }
 
 /**
@@ -137,7 +149,9 @@ async function suggestion(session: SessionRow, cycle: CycleRow, slotId: string, 
   const slot = getSlot(slotId);
   const { exercise } = exerciseByKey(exerciseKey);
   const settings = await getSettings();
-  const last = await lastPast(exerciseKey, session.id);
+  const last =
+    (await lastPast(exerciseKey, session.id)) ??
+    (exercise.inheritsFrom ? await lastPast(exercise.inheritsFrom, session.id) : null);
   const intro = exercise.bodyweightFirst
     ? (await pastSessions(exerciseKey, session.id, true)).sessions.length < exercise.bodyweightFirst
     : false;
@@ -192,17 +206,25 @@ export async function startSession(dayId: DayId, now = new Date()): Promise<numb
 }
 
 /**
- * Незавершённая тренировка, начатая по прежней программе: упражнения, убранные из программы
- * и ещё не начатые (ни одного отмеченного подхода), заменяются действующими.
+ * Незавершённая тренировка, начатая по прежней редакции программы:
+ * убранные упражнения, в которых ещё нет отмеченных подходов, удаляются,
+ * недостающие упражнения действующей программы добавляются. Начатое не трогается.
  */
-export async function refreshRetired(sessionId: number): Promise<boolean> {
-  const { session, sets } = await sessionBundle(sessionId);
+export async function syncWithProgram(sessionId: number): Promise<boolean> {
+  const { session, cycle, sets, skips } = await sessionBundle(sessionId);
   if (session.finishedAt) return false;
   let changed = false;
+  for (const slotId of new Set(sets.map((r) => r.slotId))) {
+    const slot = getSlot(slotId);
+    if (slot.retiredAfter && !sets.some((r) => r.slotId === slotId && r.done)) {
+      await db.sets.where({ sessionId }).filter((r) => r.slotId === slotId).delete();
+      changed = true;
+    }
+  }
+  const present = new Set([...sets.map((r) => r.slotId), ...skips.map((r) => r.slotId)]);
   for (const slot of getDay(session.day).slots) {
-    const rows = sets.filter((r) => r.slotId === slot.id);
-    if (rows.length && !rows.some((r) => r.done) && exerciseByKey(rows[0].exerciseKey).retired) {
-      await replaceSlotRows(sessionId, slot.id, slot.exercise.key);
+    if (!present.has(slot.id)) {
+      await createSlotRows(session, cycle, slot.id, await lastKeyForSlot(slot.id));
       changed = true;
     }
   }
@@ -372,7 +394,7 @@ export async function importBackup(b: Backup): Promise<void> {
     for (const t of tables) await t.clear();
     await db.cycles.bulkAdd(b.cycles);
     await db.sessions.bulkAdd(b.sessions);
-    await db.sets.bulkAdd(b.sets);
+    await db.sets.bulkAdd(b.sets.map((r) => ({ ...r, slotId: normalizeSlotId(r) })));
     await db.skips.bulkAdd(b.skips);
     await db.bodyweight.bulkAdd(b.bodyweight);
     if (b.settings) await db.settings.put(b.settings);

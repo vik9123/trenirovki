@@ -20,7 +20,7 @@ import { Stepper } from '../ui/Stepper';
 type Bundle = Awaited<ReturnType<typeof repo.sessionBundle>>;
 
 async function load(id: number) {
-  await repo.refreshRetired(id);
+  await repo.syncWithProgram(id);
   const [bundle, settings] = await Promise.all([repo.sessionBundle(id), repo.getSettings()]);
   return { ...bundle, settings };
 }
@@ -49,6 +49,7 @@ export function Workout({ id }: { id: number }) {
   const [hint, setHint] = useState<Suggestion | null>(null);
   const [prev, setPrev] = useState<{ past: Past; week: number } | null>(null);
   const [tech, setTech] = useState(false);
+  const [warmup, setWarmup] = useState(false);
   const [sheet, setSheet] = useState<'toc' | 'finish' | 'menu' | null>(null);
   const [rest, setRestRaw] = useState<Rest | null>(() => readLocal<Rest>(`rest:${id}`));
 
@@ -67,7 +68,9 @@ export function Workout({ id }: { id: number }) {
   };
 
   const day = data ? getDay(data.session.day) : null;
-  const slot = day ? day.slots[Math.min(idx, day.slots.length - 1)] : null;
+  // Упражнения этой тренировки (по её записям): старая показывается так, как её делали.
+  const slots = data ? repo.sessionSlots(data) : [];
+  const slot = slots.length ? slots[Math.min(idx, slots.length - 1)] : null;
   const rows = data && slot ? data.sets.filter((s) => s.slotId === slot.id) : [];
   const key = rows[0]?.exerciseKey ?? slot?.id ?? '';
   const skipped = !!(data && slot && data.skips.some((s) => s.slotId === slot.id));
@@ -91,7 +94,7 @@ export function Workout({ id }: { id: number }) {
   const { session, cycle, settings } = data;
   const { exercise, retired } = exerciseByKey(key);
   const count = skipped ? plannedSets(day, slot, session.week, cycle.number) : rows.length;
-  const last = idx >= day.slots.length - 1;
+  const last = idx >= slots.length - 1;
   const label = weekLabel(session.week, cycle.number);
 
   const patchLocal = (changes: Map<number, Partial<SetRow>>) =>
@@ -158,8 +161,19 @@ export function Workout({ id }: { id: number }) {
       </div>
 
       <div class="ex-head">
-        <div class="faint small" style="margin-bottom:4px">Упражнение {idx + 1} из {day.slots.length}</div>
+        {idx === 0 && !finished && (
+          <div style="margin-bottom:12px">
+            <button class="btn" onClick={() => setWarmup(!warmup)}>🔥 Разминка — 8 минут</button>
+            {warmup && (
+              <ul class="technique" style="margin:10px 0 0;padding-left:30px">
+                {day.warmup.map((w) => <li>{w}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+        <div class="faint small" style="margin-bottom:4px">Упражнение {idx + 1} из {slots.length}</div>
         <h1>{exercise.name}</h1>
+        {exercise.muscles && <div class="muted small" style="margin:-2px 0 6px">{exercise.muscles}</div>}
         <div class="ex-meta num">
           <span>{count} × {range(slot)}{exercise.perSide ? ' на ногу' : ''}</span>
           <span>отдых {slot.restSec} с</span>
@@ -246,7 +260,7 @@ export function Workout({ id }: { id: number }) {
       {sheet === 'toc' && (
         <Sheet title="Упражнения" onClose={() => setSheet(null)}>
           <div class="toc">
-            {day.slots.map((s, i) => {
+            {slots.map((s, i) => {
               const sk = data.skips.some((x) => x.slotId === s.id);
               const d = doneCount(s.id);
               const t = totalCount(s.id);

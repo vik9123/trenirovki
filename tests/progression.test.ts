@@ -121,7 +121,7 @@ describe('подсказка прогрессии', () => {
   });
 
   test('боковой подъём: первые тренировки без гантелей — вес 0, повторения растут', () => {
-    const slot = getSlot('tue-1'); // 4 × 10-12, на ногу
+    const slot = getSlot('tue-stepup'); // 4 × 10-12, на ногу
     const first = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 3, past: null, bodyweightOnly: true });
     expect(first).toEqual({ weight: 0, values: [10, 10, 10], hint: 'Первые две недели — без гантелей', increased: false });
     const second = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 4, past: sets(0, [12, 12, 12]), bodyweightOnly: true });
@@ -131,10 +131,37 @@ describe('подсказка прогрессии', () => {
   });
 
   test('после вводных тренировок — обычное правило: верх набран → первая гантель', () => {
-    const slot = getSlot('tue-1');
+    const slot = getSlot('tue-stepup');
     const s = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 4, past: sets(0, [12, 12, 12, 12]) });
     expect(s.weight).toBe(2);
     expect(s.values).toEqual([10, 10, 10, 10]);
     expect(s.hint).toBe('Верх набран → +2 кг, назад к 10');
+  });
+
+  test('разведения (лёгкий день, 4 × 15): верх 15 набран — вес держим, повторения растут до 20', () => {
+    const slot = getSlot('tue-6');
+    const s = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 4, past: sets(8, [15, 15, 15, 15]) });
+    expect(s.weight).toBe(8);
+    expect(s.values).toEqual([15, 15, 15, 15]);
+    expect(s.hint).toBe('Держим вес, +1 повтор (до 20)');
+  });
+
+  test('разведения: 20 во всех подходах → + шаг, назад к нижней границе', () => {
+    const slot = getSlot('tue-6');
+    const s = suggest({ ...base, slot, kind: 'light', equipment: 'dumbbell', count: 4, past: sets(8, [20, 20, 20, 20]) });
+    expect(s.weight).toBe(10);
+    expect(s.values).toEqual([15, 15, 15, 15]);
+    expect(s.hint).toBe('20 повторений набраны → +2 кг, назад к 15');
+  });
+
+  test('разведения в тяжёлый день (Пт, 3 × 12-15): добиваем до 20, а не до 15', () => {
+    const slot = getSlot('fri-lat');
+    const hold = suggest({ ...base, slot, kind: 'heavy', equipment: 'dumbbell', count: 3, past: sets(10, [15, 15, 15]) });
+    expect(hold.weight).toBe(10);
+    expect(hold.hint).toBe('Держим вес, добиваем до 20');
+    const up = suggest({ ...base, slot, kind: 'heavy', equipment: 'dumbbell', count: 3, past: sets(10, [20, 20, 20]) });
+    expect(up.weight).toBe(12);
+    expect(up.values).toEqual([12, 12, 12]);
+    expect(up.hint).toBe('20 повторений набраны → +2 кг, назад к 12');
   });
 });

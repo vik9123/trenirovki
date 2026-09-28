@@ -20,7 +20,7 @@ async function snapshot() {
 describe('резервная копия', () => {
   test('экспорт → JSON → импорт в чистую базу даёт те же данные', async () => {
     const id = await repo.startSession('tue', new Date(2026, 8, 29, 9));
-    await repo.setSkipped(id, 'tue-8', true);
+    await repo.setSkipped(id, 'tue-6', true);
     const { sets } = await repo.sessionBundle(id);
     await repo.updateSet(sets[0].id!, { weight: 40, value: 15, rir: 2, pain: true, done: true });
     await repo.finishSession(id, { wellbeing: 5, back: 'ok', note: 'хорошо' }, new Date(2026, 8, 29, 10));
@@ -32,7 +32,7 @@ describe('резервная копия', () => {
     const parsed = parseBackup(text);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.summary).toBe('Тренировок: 1, подходов: 21, записей веса тела: 1. Период: 2026-09-29 — 2026-09-29.');
+    expect(parsed.summary).toBe('Тренировок: 1, подходов: 18, записей веса тела: 1. Период: 2026-09-29 — 2026-09-29.');
 
     resetDb(`restore-${Math.random()}`);
     await repo.startSession('mon'); // мусор, который должен исчезнуть

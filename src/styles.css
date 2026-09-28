@@ -127,7 +127,7 @@ button { cursor: pointer; }
 }
 .topbar .title { flex: 1; min-width: 0; text-align: center; }
 .topbar .title b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topbar .title span { font-size: 13px; color: var(--muted); }
+.topbar .title span { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .icon-btn { width: var(--tap); height: var(--tap); border: 0; border-radius: 12px; background: transparent; display: grid; place-items: center; color: var(--text); flex: none; }
 .icon-btn svg { width: 24px; height: 24px; }
 .icon-btn:active { background: var(--surface-2); }

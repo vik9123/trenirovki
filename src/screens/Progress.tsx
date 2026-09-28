@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import * as repo from '../data/repo';
-import { DAYS, RETIRED } from '../program';
+import { DAYS, getDay, RETIRED } from '../program';
 import { formatDate, formatKg } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 import { LineChart, StackedBars } from '../ui/Chart';
@@ -78,7 +78,7 @@ export function Progress() {
           </optgroup>
         ))}
         <optgroup label="Прежние упражнения">
-          {RETIRED.map((r) => <option value={r.exercise.key}>{r.exercise.name} (до {r.until.split('-').reverse().join('.')})</option>)}
+          {RETIRED.map((r) => <option value={r.exercise.key}>{r.exercise.name} — {getDay(r.day).short}, до {r.retiredAfter!.split('-').reverse().slice(0, 2).join('.')}</option>)}
         </optgroup>
       </select>
       <div class="card" style="margin-top:12px">
