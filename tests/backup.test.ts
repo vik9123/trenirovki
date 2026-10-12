@@ -20,7 +20,7 @@ async function snapshot() {
 describe('резервная копия', () => {
   test('экспорт → JSON → импорт в чистую базу даёт те же данные', async () => {
     const id = await repo.startSession('tue', new Date(2026, 8, 29, 9));
-    await repo.setSkipped(id, 'tue-6', true);
+    await repo.setSkipped(id, 'tue-cable-lat', true);
     const { sets } = await repo.sessionBundle(id);
     await repo.updateSet(sets[0].id!, { weight: 40, value: 15, rir: 2, pain: true, done: true });
     await repo.finishSession(id, { wellbeing: 5, back: 'ok', note: 'хорошо' }, new Date(2026, 8, 29, 10));

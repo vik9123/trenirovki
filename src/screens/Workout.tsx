@@ -175,7 +175,7 @@ export function Workout({ id }: { id: number }) {
         <h1>{exercise.name}</h1>
         {exercise.muscles && <div class="muted small" style="margin:-2px 0 6px">{exercise.muscles}</div>}
         <div class="ex-meta num">
-          <span>{count} × {range(slot)}{exercise.perSide ? ' на ногу' : ''}</span>
+          <span>{count} × {range(slot)}{exercise.perSide === 'arm' ? ' на руку' : exercise.perSide ? ' на ногу' : ''}</span>
           <span>отдых {slot.restSec} с</span>
           {retired ? <span>прежняя программа</span> : exercise.key !== slot.exercise.key && <span>вместо: {slot.exercise.name}</span>}
         </div>

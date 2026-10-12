@@ -113,34 +113,49 @@ describe('подсказки из истории', () => {
 
   test('замена ведёт свою историю и запоминается', async () => {
     const id = await repo.startSession('mon', tick(0));
-    await repo.swapExercise(id, 'mon-4', true);
+    await repo.swapExercise(id, 'mon-lat-machine', true);
     let { sets } = await repo.sessionBundle(id);
-    const rows = sets.filter((s) => s.slotId === 'mon-4');
-    expect(rows.every((s) => s.exerciseKey === 'mon-4~sub')).toBe(true);
-    for (const s of rows) await repo.updateSet(s.id!, { weight: 30, value: 10, done: true });
-    await repo.finishSession(id, { wellbeing: 3, back: 'ache', note: 'поясница' }, tick(0));
-    expect(await repo.lastPast('mon-4')).toBeNull();
-    expect((await repo.lastPast('mon-4~sub'))?.past.sets[0].weight).toBe(30);
+    const rows = sets.filter((s) => s.slotId === 'mon-lat-machine');
+    expect(rows.every((s) => s.exerciseKey === 'mon-lat-machine~sub')).toBe(true);
+    for (const s of rows) await repo.updateSet(s.id!, { weight: 6, value: 15, done: true });
+    await repo.finishSession(id, { wellbeing: 3, back: 'ok', note: 'защемление в тренажёре' }, tick(0));
+    expect(await repo.lastPast('mon-lat-machine')).toBeNull();
+    expect((await repo.lastPast('mon-lat-machine~sub'))?.past.sets[0].weight).toBe(6);
 
     const c = await repo.getActiveCycle();
     await repo.advanceWeek(c.id!);
     const id2 = await repo.startSession('mon', tick(1));
     ({ sets } = await repo.sessionBundle(id2));
-    const next = sets.filter((s) => s.slotId === 'mon-4');
-    expect(next[0].exerciseKey).toBe('mon-4~sub');
-    expect(next[0].weight).toBe(32);
+    const next = sets.filter((s) => s.slotId === 'mon-lat-machine');
+    expect(next[0].exerciseKey).toBe('mon-lat-machine~sub');
+    expect(next[0].weight).toBe(8); // гантели +2
+  });
+
+  test('Т-гриф убран 12.10: его замена из прежней редакции не подставляется в рычажную тягу', async () => {
+    const cycle = await repo.getActiveCycle();
+    const old = (await db.sessions.add({ cycleId: cycle.id!, week: 1, day: 'mon', date: '2026-10-05', startedAt: tick(0).getTime(), finishedAt: tick(0).getTime() })) as number;
+    for (let i = 1; i <= 3; i++) {
+      await db.sets.add({ sessionId: old, slotId: 'mon-4', exerciseKey: 'mon-4~sub', index: i, weight: 30, value: 10, pain: false, done: true });
+    }
+    await repo.advanceWeek(cycle.id!);
+    const id = await repo.startSession('mon', tick(1));
+    const b = await repo.sessionBundle(id);
+    expect(repo.sessionSlots(b).map((s) => s.id)).not.toContain('mon-4');
+    const lever = b.sets.filter((s) => s.slotId === 'mon-lever-row');
+    expect(lever.every((s) => s.exerciseKey === 'mon-lever-row' && s.weight === 0)).toBe(true);
+    expect((await repo.suggestionFor(id, 'mon-lever-row')).hint).toBe('Калибровка: подберите рабочий вес');
   });
 
   test('пропуск упражнения убирает подходы, возврат — создаёт заново', async () => {
     const id = await repo.startSession('tue', tick(0));
-    await repo.setSkipped(id, 'tue-6', true);
+    await repo.setSkipped(id, 'tue-cable-lat', true);
     let b = await repo.sessionBundle(id);
-    expect(b.sets.filter((s) => s.slotId === 'tue-6')).toHaveLength(0);
-    expect(b.skips.map((s) => s.slotId)).toEqual(['tue-6']);
-    expect(repo.sessionSlots(b).map((s) => s.id)).toContain('tue-6'); // пропущенное остаётся в списке
-    await repo.setSkipped(id, 'tue-6', false);
+    expect(b.sets.filter((s) => s.slotId === 'tue-cable-lat')).toHaveLength(0);
+    expect(b.skips.map((s) => s.slotId)).toEqual(['tue-cable-lat']);
+    expect(repo.sessionSlots(b).map((s) => s.id)).toContain('tue-cable-lat'); // пропущенное остаётся в списке
+    await repo.setSkipped(id, 'tue-cable-lat', false);
     b = await repo.sessionBundle(id);
-    expect(b.sets.filter((s) => s.slotId === 'tue-6')).toHaveLength(3);
+    expect(b.sets.filter((s) => s.slotId === 'tue-cable-lat')).toHaveLength(3);
     expect(b.skips).toHaveLength(0);
   });
 
@@ -177,7 +192,7 @@ describe('история и сводка', () => {
     expect(rows).toHaveLength(8);
     const w1 = rows[0];
     // Пн неделя 1: 21 подход по 10 кг × верх диапазона
-    // жим 10, подтягивания 8, брусья 10, Т-гриф 10, подъём в тренажёре 15, Скотт 10, гиперэкстензия 12 — по 3 подхода
+    // жим 10, подтягивания 8, брусья 10, рычажная тяга 10, подъём в тренажёре 15, Скотт 10, гиперэкстензия 12 — по 3 подхода
     const monExpected = 10 * 3 * (10 + 8 + 10 + 10 + 15 + 10 + 12);
     expect(w1.byDay.mon).toBe(monExpected);
     expect(w1.total).toBe(w1.byDay.mon + w1.byDay.tue + w1.byDay.thu + w1.byDay.fri);
@@ -277,8 +292,9 @@ describe('история и сводка', () => {
     expect(await repo.syncWithProgram(id)).toBe(true);
     const b = await repo.sessionBundle(id);
     // убранное и не начатое — ушло; начатое (фермер) — осталось; недостающие — добавлены
+    // tue-6 (разведения гантелями) убраны 12.10, но здесь уже начаты — остаются рядом с блочными
     expect(repo.sessionSlots(b).map((s) => s.id)).toEqual([
-      'tue-6', 'tue-face-pull', 'tue-stepup', 'tue-sl-rdl', 'tue-3', 'tue-4', 'tue-5', 'tue-8',
+      'tue-cable-lat', 'tue-6', 'tue-face-pull', 'tue-stepup', 'tue-sl-rdl', 'tue-3', 'tue-4', 'tue-5', 'tue-8',
     ]);
     expect(b.sets.filter((s) => s.slotId === 'tue-6')).toHaveLength(1); // начатое не пересоздаётся
     expect(b.sets.filter((s) => s.slotId === 'tue-face-pull')).toHaveLength(3); // неделя 1: 4 → 3
