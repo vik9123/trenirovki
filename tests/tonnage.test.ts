@@ -3,21 +3,18 @@ import { tonnage } from '../src/logic/tonnage';
 import { formatKg, formatDuration, plural } from '../src/lib/format';
 
 describe('тоннаж', () => {
-  test('пример из листа «Как вести»: 24×10 + 24×9 + 24×8 + 24×8 = 840', () => {
-    const sets = [10, 9, 8, 8].map((value) => ({ slotId: 'mon-1', weight: 24, value, done: true }));
+  test('24×10 + 24×9 + 24×8 + 24×8 = 840', () => {
+    const sets = [10, 9, 8, 8].map((value) => ({ weight: 24, value, done: true }));
     expect(tonnage(sets)).toBe(840);
   });
 
   test('невыполненные подходы не считаются', () => {
     expect(tonnage([
-      { slotId: 'mon-1', weight: 24, value: 10, done: true },
-      { slotId: 'mon-1', weight: 24, value: 10, done: false },
+      { weight: 24, value: 10, done: true },
+      { weight: 24, value: 10, done: false },
     ])).toBe(240);
   });
 
-  test('прогулка фермера не входит в тоннаж', () => {
-    expect(tonnage([{ slotId: 'tue-8', weight: 24, value: 40, done: true }])).toBe(0);
-  });
 
   test('пустой список — 0', () => {
     expect(tonnage([])).toBe(0);

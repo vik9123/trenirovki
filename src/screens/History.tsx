@@ -17,26 +17,29 @@ export function History() {
     <div class="screen">
       <h1>История</h1>
       {data && !data.length && <div class="empty">Тренировок пока нет</div>}
-      {data?.map(({ s, cycle, t }) => (
-        <a class="list-item" href={`#/w/${s.id}`} style="display:block;margin-bottom:10px">
-          <div class="card">
-            <div class="spread">
-              <b>{formatDate(s.date)} · {getDay(s.day).short}</b>
-              <span class={`chip ${s.finishedAt ? getDay(s.day).kind : 'accent'}`}>{s.finishedAt ? getDay(s.day).title.split('— ')[1] : 'не завершена'}</span>
-            </div>
-            <div class="muted small num" style="margin-top:6px">
-              Цикл {cycle} · неделя {s.week} · {formatKg(t)} кг
-              {s.finishedAt ? ` · ${formatDuration(s.finishedAt - s.startedAt)}` : ''}
-            </div>
-            {s.finishedAt && s.wellbeing && (
-              <div class="small" style="margin-top:4px">
-                Самочувствие {s.wellbeing}/5{s.back ? ` · ${BACK[s.back]}` : ''}
-                {s.note ? <span class="muted"> · {s.note}</span> : null}
+      {data?.map(({ s, cycle, t }) => {
+        const day = getDay(s.day);
+        return (
+          <a class="list-item" href={`#/w/${s.id}`} style="display:block;margin-bottom:10px">
+            <div class="card">
+              <div class="spread">
+                <b>{formatDate(s.date)} · {day.short}</b>
+                <span class={`chip ${s.finishedAt ? day.kind : 'accent'}`}>{s.finishedAt ? (day.kind === 'heavy' ? 'тяжёлый' : 'лёгкий') : 'не завершена'}</span>
               </div>
-            )}
-          </div>
-        </a>
-      ))}
+              <div class="muted small num" style="margin-top:6px">
+                Цикл {cycle} · неделя {s.week} · {formatKg(t)} кг
+                {s.finishedAt ? ` · ${formatDuration(s.finishedAt - s.startedAt)}` : ''}
+              </div>
+              {s.finishedAt && s.wellbeing && (
+                <div class="small" style="margin-top:4px">
+                  Самочувствие {s.wellbeing}/5{s.back ? ` · ${BACK[s.back]}` : ''}
+                  {s.note ? <span class="muted"> · {s.note}</span> : null}
+                </div>
+              )}
+            </div>
+          </a>
+        );
+      })}
     </div>
   );
 }

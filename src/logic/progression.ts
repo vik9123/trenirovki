@@ -38,8 +38,6 @@ export interface SuggestArgs {
   past: Past | null;
   deload: boolean;
   steps: Steps;
-  /** Вводные тренировки упражнения без отягощения (боковой подъём — первые две недели). */
-  bodyweightOnly?: boolean;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -48,14 +46,11 @@ const round = (n: number) => Math.round(n * 100) / 100;
  * Два правила программы:
  * тяжёлый день — набрали верх во всех подходах → вес + шаг;
  * лёгкий день — вес держим, растут повторения; дошли до верха → вес + шаг и назад к нижней границе.
- * В обоих случаях после повышения веса повторения начинаются с нижней границы.
+ * Разведения: сначала повторения до 20 (progressTo), потом вес.
+ * После повышения веса повторения начинаются с нижней границы.
  */
-export function suggest({ slot, kind, equipment, count, past, deload, steps, bodyweightOnly }: SuggestArgs): Suggestion {
+export function suggest({ slot, kind, equipment, count, past, deload, steps }: SuggestArgs): Suggestion {
   const floor = Array<number>(count).fill(slot.repMin);
-  if (bodyweightOnly) {
-    const values = floor.map((min, i) => (past?.sets[i]?.done ? past.sets[i].value : min));
-    return { weight: 0, values, hint: 'Первые две недели — без гантелей', increased: false };
-  }
   if (!past || !past.sets.some((s) => s.done)) {
     return { weight: 0, values: floor, hint: 'Калибровка: подберите рабочий вес', increased: false };
   }
@@ -71,18 +66,15 @@ export function suggest({ slot, kind, equipment, count, past, deload, steps, bod
   if (deload) return hold('Разгрузка: веса те же, подходов меньше');
   if (past.sets.some((s) => s.pain)) return hold('В прошлый раз была боль — держим вес');
 
-  // Разведения: сначала повторения до progressTo (20), потом вес.
   const top = slot.progressTo ?? slot.repMax;
   const topReached = past.sets.length > 0 && past.sets.every((s) => s.done && s.value >= top);
   if (topReached) {
     const step = steps[equipment];
-    const sec = slot.unit === 'sec';
-    const head = sec ? `${top} с набраны` : slot.progressTo ? `${top} повторений набраны` : 'Верх набран';
-    const back = sec ? `, назад к ${slot.repMin} с` : kind === 'light' || slot.progressTo ? `, назад к ${slot.repMin}` : '';
+    const head = slot.progressTo ? `${top} повторений набраны` : 'Верх набран';
+    const back = kind === 'light' || slot.progressTo ? `, назад к ${slot.repMin}` : '';
     return { weight: round(weight + step), values: floor, hint: `${head} → +${formatKg(step)} кг${back}`, increased: true };
   }
 
   if (kind === 'heavy') return hold(`Держим вес, добиваем до ${top}`);
-  if (slot.unit === 'sec') return hold('Держим вес, +5 с');
   return hold(slot.progressTo ? `Держим вес, +1 повтор (до ${top})` : 'Держим вес, +1 повтор');
 }

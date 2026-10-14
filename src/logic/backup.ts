@@ -1,23 +1,32 @@
-import type { BodyweightRow, CycleRow, SessionRow, SetRow, SettingsRow, SkipRow } from '../data/db';
+import type { BodyweightRow, CycleRow, SessionRow, SetRow, SettingsRow } from '../data/db';
 import { isoDate } from '../lib/format';
+import { getDay, isKnownKey, type DayId } from '../program';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface Backup {
   app: 'trenirovki';
-  schemaVersion: 1;
+  schemaVersion: 2;
   exportedAt: string;
   cycles: CycleRow[];
   sessions: SessionRow[];
   sets: SetRow[];
-  skips: SkipRow[];
   bodyweight: BodyweightRow[];
   settings: SettingsRow | null;
 }
 
-const TABLES = ['cycles', 'sessions', 'sets', 'skips', 'bodyweight'] as const;
+const TABLES = ['cycles', 'sessions', 'sets', 'bodyweight'] as const;
 
 export type ParseResult = { ok: true; backup: Backup; summary: string } | { ok: false; error: string };
+
+function knownDay(d: DayId): boolean {
+  try {
+    getDay(d);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function parseBackup(text: string): ParseResult {
   let data: unknown;
@@ -30,6 +39,9 @@ export function parseBackup(text: string): ParseResult {
   if (!b || typeof b !== 'object' || b.app !== 'trenirovki') {
     return { ok: false, error: 'Это не резервная копия журнала тренировок' };
   }
+  if (typeof b.schemaVersion === 'number' && b.schemaVersion < SCHEMA_VERSION) {
+    return { ok: false, error: 'Копия от прежней программы тренировок — восстановить её нельзя' };
+  }
   if (b.schemaVersion !== SCHEMA_VERSION) {
     return { ok: false, error: `Копия сделана более новой версией приложения (формат ${b.schemaVersion}) — обновите приложение` };
   }
@@ -37,6 +49,9 @@ export function parseBackup(text: string): ParseResult {
     if (!Array.isArray(b[t])) return { ok: false, error: `В копии не хватает раздела «${t}»` };
   }
   const backup = b as Backup;
+  if (!backup.sets.every((s) => isKnownKey(s.exerciseKey)) || !backup.sessions.every((s) => knownDay(s.day))) {
+    return { ok: false, error: 'В копии упражнения, которых нет в программе, — восстановить её нельзя' };
+  }
   const dates = backup.sessions.map((s) => s.date).sort();
   const period = dates.length ? ` Период: ${dates[0]} — ${dates[dates.length - 1]}.` : '';
   const summary =

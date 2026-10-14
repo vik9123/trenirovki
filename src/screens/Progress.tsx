@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import * as repo from '../data/repo';
-import { DAYS, getDay, RETIRED } from '../program';
+import { DAYS } from '../program';
 import { formatDate, formatKg } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 import { LineChart, StackedBars } from '../ui/Chart';
@@ -16,15 +16,8 @@ export function Progress() {
   const current = cycleId ?? cycles.data?.[cycles.data.length - 1]?.id ?? null;
   const summary = useAsync(() => (current ? repo.weeklySummary(current) : Promise.resolve([])), [current]);
 
-  const options = DAYS.flatMap((d) =>
-    d.slots.flatMap((s) => [
-      { key: s.exercise.key, label: `${d.short} · ${s.exercise.name}`, day: d.title },
-      ...(s.substitute ? [{ key: s.substitute.key, label: `${d.short} · ${s.substitute.name}`, day: d.title }] : []),
-    ]),
-  );
-  const [exKey, setExKey] = useState(options[0].key);
+  const [exKey, setExKey] = useState(DAYS[0].slots[0].exercise.key);
   const history = useAsync(() => repo.exerciseHistory(exKey), [exKey]);
-  const isSec = exKey === 'tue-8';
 
   const rows = summary.data ?? [];
   const hasData = rows.some((r) => r.total > 0);
@@ -74,12 +67,12 @@ export function Progress() {
       <select value={exKey} onChange={(e) => setExKey((e.target as HTMLSelectElement).value)}>
         {DAYS.map((d) => (
           <optgroup label={d.title}>
-            {options.filter((o) => o.day === d.title).map((o) => <option value={o.key}>{o.label.split(' · ')[1]}</option>)}
+            {d.slots.flatMap((s) => [
+              <option value={s.exercise.key}>{s.exercise.name}</option>,
+              ...(s.substitute ? [<option value={s.substitute.key}>{s.substitute.name} (замена)</option>] : []),
+            ])}
           </optgroup>
         ))}
-        <optgroup label="Прежние упражнения">
-          {RETIRED.map((r) => <option value={r.exercise.key}>{r.exercise.name} — {getDay(r.day).short}, до {r.retiredAfter!.split('-').reverse().slice(0, 2).join('.')}</option>)}
-        </optgroup>
       </select>
       <div class="card" style="margin-top:12px">
         <b>Рабочий вес, кг</b>
@@ -90,11 +83,11 @@ export function Progress() {
               points={history.data.map((h) => ({
                 label: h.date.slice(8, 10) + '.' + h.date.slice(5, 7),
                 value: h.top,
-                note: `${formatDate(h.date)}: ${formatKg(h.top)} кг, всего ${h.total} ${isSec ? 'с' : 'повт.'}`,
+                note: `${formatDate(h.date)}: ${formatKg(h.top)} кг, всего ${h.total} повт.`,
               }))}
             />
             <table class="table num" style="margin-top:12px">
-              <thead><tr><th>Дата</th><th>Вес, кг</th><th>{isSec ? 'Секунд' : 'Повторений'}</th></tr></thead>
+              <thead><tr><th>Дата</th><th>Вес, кг</th><th>Повторений</th></tr></thead>
               <tbody>
                 {history.data.slice(-8).reverse().map((h) => (
                   <tr><td>{formatDate(h.date)}</td><td>{formatKg(h.top)}</td><td>{h.total}</td></tr>

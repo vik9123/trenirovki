@@ -1,5 +1,5 @@
-import { db, normalizeSlotId, type Back, type BodyweightRow, type CycleRow, type SessionRow, type SetRow, type SettingsRow, type SkipRow } from './db';
-import { DAYS, exerciseByKey, getDay, getSlot, isCurrentKey, type DayId, type Slot } from '../program';
+import { db, type Back, type BodyweightRow, type CycleRow, type SessionRow, type SetRow, type SettingsRow } from './db';
+import { DAYS, exerciseByKey, getDay, getSlot, type DayId, type Slot } from '../program';
 import { isDeload, plannedSets, WEEKS } from '../logic/cycle';
 import { DEFAULT_STEPS, suggest, type Past, type Suggestion } from '../logic/progression';
 import { tonnage } from '../logic/tonnage';
@@ -68,44 +68,11 @@ export async function sessionBundle(id: number) {
   if (!session) throw new Error('Тренировка не найдена');
   const cycle = (await db.cycles.get(session.cycleId))!;
   const sets = (await db.sets.where({ sessionId: id }).toArray()).sort(bySlotThenIndex);
-  const skips = await db.skips.where({ sessionId: id }).toArray();
-  return { session, cycle, sets, skips };
-}
-
-/** Порядок упражнений: место в дне; убранное — после действующего с тем же местом. */
-function slotRank(s: Slot): number {
-  return s.order * 2 + (s.retiredAfter ? 1 : 0);
+  return { session, cycle, sets };
 }
 
 function bySlotThenIndex(a: SetRow, b: SetRow) {
-  return slotRank(getSlot(a.slotId)) - slotRank(getSlot(b.slotId)) || a.index - b.index;
-}
-
-/**
- * Упражнения этой тренировки — по её записям и пропускам, а не по текущей программе:
- * старая тренировка показывается так, как её делали.
- */
-export function sessionSlots(b: { sets: SetRow[]; skips: SkipRow[] }): Slot[] {
-  const ids = new Set([...b.sets.map((s) => s.slotId), ...b.skips.map((s) => s.slotId)]);
-  return [...ids].map(getSlot).sort((x, y) => slotRank(x) - slotRank(y));
-}
-
-/**
- * Завершённые тренировки с упражнением, раньше данной (если указана), по возрастанию времени.
- * includeDeload — учитывать ли неделю разгрузки.
- */
-async function pastSessions(exerciseKey: string, beforeSessionId: number | undefined, includeDeload: boolean) {
-  const rows = await db.sets.where({ exerciseKey }).toArray();
-  if (!rows.length) return { rows, sessions: [] as SessionRow[] };
-  const before = beforeSessionId ? await db.sessions.get(beforeSessionId) : undefined;
-  const ids = [...new Set(rows.map((r) => r.sessionId))];
-  const sessions = (await db.sessions.bulkGet(ids))
-    .filter(
-      (s): s is SessionRow =>
-        !!s && !!s.finishedAt && (includeDeload || !isDeload(s.week)) && s.id !== beforeSessionId && (!before || s.startedAt < before.startedAt),
-    )
-    .sort((a, b) => a.startedAt - b.startedAt);
-  return { rows, sessions };
+  return getSlot(a.slotId).order - getSlot(b.slotId).order || a.index - b.index;
 }
 
 /**
@@ -113,9 +80,16 @@ async function pastSessions(exerciseKey: string, beforeSessionId: number | undef
  * кроме недели разгрузки. before — считать «прошлым» только то, что было раньше этой тренировки.
  */
 export async function lastPast(exerciseKey: string, beforeSessionId?: number): Promise<{ past: Past; week: number } | null> {
-  const { rows, sessions } = await pastSessions(exerciseKey, beforeSessionId, false);
-  const last = sessions[sessions.length - 1];
-  if (!last) return null;
+  const rows = await db.sets.where({ exerciseKey }).toArray();
+  if (!rows.length) return null;
+  const before = beforeSessionId ? await db.sessions.get(beforeSessionId) : undefined;
+  const ids = [...new Set(rows.map((r) => r.sessionId))];
+  const sessions = (await db.sessions.bulkGet(ids)).filter(
+    (s): s is SessionRow =>
+      !!s && !!s.finishedAt && !isDeload(s.week) && s.id !== beforeSessionId && (!before || s.startedAt < before.startedAt),
+  );
+  if (!sessions.length) return null;
+  const last = sessions.reduce((a, b) => (b.startedAt > a.startedAt ? b : a));
   const sets = rows
     .filter((r) => r.sessionId === last.id)
     .sort((a, b) => a.index - b.index)
@@ -123,13 +97,10 @@ export async function lastPast(exerciseKey: string, beforeSessionId?: number): P
   return { past: { sets }, week: last.week };
 }
 
-/**
- * Какое упражнение слота делали в последний раз: основное или замену.
- * Упражнения, убранные из программы, не возвращаются — берётся основное.
- */
+/** Какое упражнение слота делали в последний раз: основное или замену. */
 async function lastKeyForSlot(slotId: string): Promise<string> {
+  const rows = await db.sets.where({ slotId }).toArray();
   const slot = getSlot(slotId);
-  const rows = (await db.sets.where({ slotId }).toArray()).filter((r) => isCurrentKey(slot, r.exerciseKey));
   if (!rows.length) return slot.exercise.key;
   const sessions = new Map(
     (await db.sessions.bulkGet([...new Set(rows.map((r) => r.sessionId))]))
@@ -149,21 +120,15 @@ async function suggestion(session: SessionRow, cycle: CycleRow, slotId: string, 
   const slot = getSlot(slotId);
   const { exercise } = exerciseByKey(exerciseKey);
   const settings = await getSettings();
-  const last =
-    (await lastPast(exerciseKey, session.id)) ??
-    (exercise.inheritsFrom ? await lastPast(exercise.inheritsFrom, session.id) : null);
-  const intro = exercise.bodyweightFirst
-    ? (await pastSessions(exerciseKey, session.id, true)).sessions.length < exercise.bodyweightFirst
-    : false;
+  const last = await lastPast(exerciseKey, session.id);
   return suggest({
     slot,
     kind: day.kind,
     equipment: exercise.equipment,
-    count: plannedSets(day, slot, session.week, cycle.number),
+    count: plannedSets(slot, session.week, cycle.number),
     past: last?.past ?? null,
     deload: isDeload(session.week),
     steps: settings.steps,
-    bodyweightOnly: intro,
   });
 }
 
@@ -205,30 +170,9 @@ export async function startSession(dayId: DayId, now = new Date()): Promise<numb
   return id;
 }
 
-/**
- * Незавершённая тренировка, начатая по прежней редакции программы:
- * убранные упражнения, в которых ещё нет отмеченных подходов, удаляются,
- * недостающие упражнения действующей программы добавляются. Начатое не трогается.
- */
-export async function syncWithProgram(sessionId: number): Promise<boolean> {
-  const { session, cycle, sets, skips } = await sessionBundle(sessionId);
-  if (session.finishedAt) return false;
-  let changed = false;
-  for (const slotId of new Set(sets.map((r) => r.slotId))) {
-    const slot = getSlot(slotId);
-    if (slot.retiredAfter && !sets.some((r) => r.slotId === slotId && r.done)) {
-      await db.sets.where({ sessionId }).filter((r) => r.slotId === slotId).delete();
-      changed = true;
-    }
-  }
-  const present = new Set([...sets.map((r) => r.slotId), ...skips.map((r) => r.slotId)]);
-  for (const slot of getDay(session.day).slots) {
-    if (!present.has(slot.id)) {
-      await createSlotRows(session, cycle, slot.id, await lastKeyForSlot(slot.id));
-      changed = true;
-    }
-  }
-  return changed;
+/** Упражнения тренировки в порядке программы. */
+export function sessionSlots(b: { sets: SetRow[] }): Slot[] {
+  return [...new Set(b.sets.map((s) => s.slotId))].map(getSlot).sort((x, y) => x.order - y.order);
 }
 
 export async function suggestionFor(sessionId: number, slotId: string): Promise<Suggestion> {
@@ -241,28 +185,13 @@ export async function updateSet(id: number, patch: Partial<SetRow>): Promise<voi
   await db.sets.update(id, patch);
 }
 
-async function replaceSlotRows(sessionId: number, slotId: string, exerciseKey: string | null) {
-  const { session, cycle } = await sessionBundle(sessionId);
-  await db.sets.where({ sessionId }).filter((s) => s.slotId === slotId).delete();
-  if (exerciseKey) await createSlotRows(session, cycle, slotId, exerciseKey);
-}
-
 /** Переключить слот на замену из документа или обратно. Подходы слота создаются заново. */
 export async function swapExercise(sessionId: number, slotId: string, useSubstitute: boolean): Promise<void> {
   const slot = getSlot(slotId);
   if (useSubstitute && !slot.substitute) throw new Error('У упражнения нет замены');
-  await replaceSlotRows(sessionId, slotId, useSubstitute ? slot.substitute!.key : slot.exercise.key);
-}
-
-export async function setSkipped(sessionId: number, slotId: string, skipped: boolean): Promise<void> {
-  const existing = await db.skips.where({ sessionId }).filter((s) => s.slotId === slotId).toArray();
-  if (skipped) {
-    await replaceSlotRows(sessionId, slotId, null);
-    if (!existing.length) await db.skips.add({ sessionId, slotId });
-  } else {
-    await db.skips.bulkDelete(existing.map((s) => s.id!));
-    await replaceSlotRows(sessionId, slotId, await lastKeyForSlot(slotId));
-  }
+  const { session, cycle } = await sessionBundle(sessionId);
+  await db.sets.where({ sessionId }).filter((s) => s.slotId === slotId).delete();
+  await createSlotRows(session, cycle, slotId, useSubstitute ? slot.substitute!.key : slot.exercise.key);
 }
 
 export interface Feel {
@@ -271,7 +200,7 @@ export interface Feel {
   note: string;
 }
 
-/** Завершить (или пересохранить) тренировку. Когда сделаны все 4 дня недели — неделя переключается. */
+/** Завершить (или пересохранить) тренировку. Когда сделаны все 3 дня недели — неделя переключается. */
 export async function finishSession(id: number, feel: Feel, now = new Date()): Promise<void> {
   const session = await db.sessions.get(id);
   if (!session) throw new Error('Тренировка не найдена');
@@ -285,9 +214,8 @@ export async function finishSession(id: number, feel: Feel, now = new Date()): P
 }
 
 export async function deleteSession(id: number): Promise<void> {
-  await db.transaction('rw', db.sessions, db.sets, db.skips, async () => {
+  await db.transaction('rw', db.sessions, db.sets, async () => {
     await db.sets.where({ sessionId: id }).delete();
-    await db.skips.where({ sessionId: id }).delete();
     await db.sessions.delete(id);
   });
 }
@@ -314,7 +242,7 @@ export async function deleteBodyweight(id: number): Promise<void> {
 
 // ---------- прогресс ----------
 
-/** По каждой завершённой тренировке с упражнением: рабочий вес и сумма повторений (секунд). */
+/** По каждой завершённой тренировке с упражнением: рабочий вес и сумма повторений. */
 export async function exerciseHistory(exerciseKey: string): Promise<{ date: string; top: number; total: number }[]> {
   const rows = (await db.sets.where({ exerciseKey }).toArray()).filter((r) => r.done);
   const bySession = new Map<number, SetRow[]>();
@@ -340,7 +268,7 @@ export interface WeekSummary {
 }
 
 /**
- * Сводка как лист «Сводка» в Excel. Вес тела недели — среднее по записям
+ * Сводка по неделям цикла. Вес тела недели — среднее по записям
  * от первой тренировки этой недели до первой тренировки следующей.
  */
 export async function weeklySummary(cycleId: number): Promise<WeekSummary[]> {
@@ -351,7 +279,7 @@ export async function weeklySummary(cycleId: number): Promise<WeekSummary[]> {
 
   const result: WeekSummary[] = [];
   for (let week = 1; week <= WEEKS; week++) {
-    const byDay: Record<DayId, number> = { mon: 0, tue: 0, thu: 0, fri: 0 };
+    const byDay: Record<DayId, number> = { tue: 0, thu: 0, sat: 0 };
     for (const s of sessions.filter((x) => x.week === week)) {
       byDay[s.day] += await sessionTonnage(s.id!);
     }
@@ -363,13 +291,13 @@ export async function weeklySummary(cycleId: number): Promise<WeekSummary[]> {
       const inRange = weights.filter((b) => b.date >= start && (!end || b.date < end));
       if (inRange.length) bodyweight = Math.round((inRange.reduce((n, b) => n + b.kg, 0) / inRange.length) * 10) / 10;
     }
-    const total = Math.round((byDay.mon + byDay.tue + byDay.thu + byDay.fri) * 100) / 100;
+    const total = Math.round((byDay.tue + byDay.thu + byDay.sat) * 100) / 100;
     result.push({ week, byDay, total, bodyweight });
   }
   return result;
 }
 
-export type { CycleRow, SessionRow, SetRow, SkipRow, BodyweightRow, SettingsRow };
+export type { CycleRow, SessionRow, SetRow, BodyweightRow, SettingsRow };
 
 // ---------- резервная копия ----------
 
@@ -381,7 +309,6 @@ export async function exportBackup(now = new Date()): Promise<Backup> {
     cycles: await db.cycles.toArray(),
     sessions: await db.sessions.toArray(),
     sets: await db.sets.toArray(),
-    skips: await db.skips.toArray(),
     bodyweight: await db.bodyweight.toArray(),
     settings: (await db.settings.get('main')) ?? null,
   };
@@ -389,13 +316,12 @@ export async function exportBackup(now = new Date()): Promise<Backup> {
 
 /** Заменяет все данные содержимым копии. */
 export async function importBackup(b: Backup): Promise<void> {
-  const tables = [db.cycles, db.sessions, db.sets, db.skips, db.bodyweight, db.settings];
+  const tables = [db.cycles, db.sessions, db.sets, db.bodyweight, db.settings];
   await db.transaction('rw', tables, async () => {
     for (const t of tables) await t.clear();
     await db.cycles.bulkAdd(b.cycles);
     await db.sessions.bulkAdd(b.sessions);
-    await db.sets.bulkAdd(b.sets.map((r) => ({ ...r, slotId: normalizeSlotId(r) })));
-    await db.skips.bulkAdd(b.skips);
+    await db.sets.bulkAdd(b.sets);
     await db.bodyweight.bulkAdd(b.bodyweight);
     if (b.settings) await db.settings.put(b.settings);
   });

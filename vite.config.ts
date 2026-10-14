@@ -14,7 +14,7 @@ export default defineConfig({
       manifest: {
         name: 'Журнал тренировок',
         short_name: 'Тренировки',
-        description: 'Дневник тренировок: сплит верх/низ, тяжёлый и лёгкий день',
+        description: 'Дневник тренировок: фулбоди 3 дня в неделю',
         lang: 'ru',
         start_url: '/trenirovki/',
         scope: '/trenirovki/',

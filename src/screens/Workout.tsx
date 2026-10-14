@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import * as repo from '../data/repo';
 import type { Back, SetRow } from '../data/db';
 import { exerciseByKey, getDay, TRANSITION_REST_SEC, type Slot } from '../program';
-import { plannedSets, weekLabel } from '../logic/cycle';
+import { weekLabel } from '../logic/cycle';
 import type { Past, Suggestion } from '../logic/progression';
 import { tonnage } from '../logic/tonnage';
 import { formatDate, formatKg } from '../lib/format';
@@ -20,21 +20,19 @@ import { Stepper } from '../ui/Stepper';
 type Bundle = Awaited<ReturnType<typeof repo.sessionBundle>>;
 
 async function load(id: number) {
-  await repo.syncWithProgram(id);
   const [bundle, settings] = await Promise.all([repo.sessionBundle(id), repo.getSettings()]);
   return { ...bundle, settings };
 }
 
-const range = (s: Slot) => (s.repMin === s.repMax ? `${s.repMin}` : `${s.repMin}-${s.repMax}`) + (s.unit === 'sec' ? ' с' : '');
+const range = (s: Slot) => (s.repMin === s.repMax ? `${s.repMin}` : `${s.repMin}-${s.repMax}`);
 
-function pastText(p: Past, unit: Slot['unit']): string {
+function pastText(p: Past): string {
   const done = p.sets.filter((s) => s.done);
   if (!done.length) return '';
-  const u = unit === 'sec' ? ' с' : '';
   if (done.every((s) => s.weight === done[0].weight)) {
-    return `${formatKg(done[0].weight)} кг × ${done.map((s) => s.value).join(', ')}${u}`;
+    return `${formatKg(done[0].weight)} кг × ${done.map((s) => s.value).join(', ')}`;
   }
-  return done.map((s) => `${formatKg(s.weight)}×${s.value}${u}`).join(', ');
+  return done.map((s) => `${formatKg(s.weight)}×${s.value}`).join(', ');
 }
 
 function hintClass(h: Suggestion): string {
@@ -68,32 +66,29 @@ export function Workout({ id }: { id: number }) {
   };
 
   const day = data ? getDay(data.session.day) : null;
-  // Упражнения этой тренировки (по её записям): старая показывается так, как её делали.
   const slots = data ? repo.sessionSlots(data) : [];
   const slot = slots.length ? slots[Math.min(idx, slots.length - 1)] : null;
   const rows = data && slot ? data.sets.filter((s) => s.slotId === slot.id) : [];
   const key = rows[0]?.exerciseKey ?? slot?.id ?? '';
-  const skipped = !!(data && slot && data.skips.some((s) => s.slotId === slot.id));
 
   useEffect(() => {
     if (!slot || !data) return;
     let alive = true;
     setHint(null);
     setPrev(null);
-    if (skipped) return;
     void repo.suggestionFor(id, slot.id).then((h) => alive && setHint(h));
     void repo.lastPast(key, id).then((p) => alive && setPrev(p));
     return () => {
       alive = false;
     };
-  }, [id, slot?.id, key, skipped, !!data]);
+  }, [id, slot?.id, key, !!data]);
 
   if (error) return <div class="screen"><p class="empty">Ошибка: {error}</p><a class="btn block" href="#/">На главную</a></div>;
   if (!data || !day || !slot) return <div class="screen" />;
 
   const { session, cycle, settings } = data;
-  const { exercise, retired } = exerciseByKey(key);
-  const count = skipped ? plannedSets(day, slot, session.week, cycle.number) : rows.length;
+  const { exercise } = exerciseByKey(key);
+  const count = rows.length;
   const last = idx >= slots.length - 1;
   const label = weekLabel(session.week, cycle.number);
 
@@ -127,11 +122,6 @@ export function Workout({ id }: { id: number }) {
 
   async function swap(useSub: boolean) {
     await repo.swapExercise(id, slot!.id, useSub);
-    await reloadBundle();
-  }
-
-  async function skip(v: boolean) {
-    await repo.setSkipped(id, slot!.id, v);
     await reloadBundle();
   }
 
@@ -177,30 +167,23 @@ export function Workout({ id }: { id: number }) {
         <div class="ex-meta num">
           <span>{count} × {range(slot)}{exercise.perSide === 'arm' ? ' на руку' : exercise.perSide ? ' на ногу' : ''}</span>
           <span>отдых {slot.restSec} с</span>
-          {retired ? <span>прежняя программа</span> : exercise.key !== slot.exercise.key && <span>вместо: {slot.exercise.name}</span>}
+          {exercise.key !== slot.exercise.key && <span>вместо: {slot.exercise.name}</span>}
         </div>
         <div class="ex-actions">
           {exercise.technique && <button class="btn" onClick={() => setTech(!tech)}>ℹ Техника</button>}
-          {slot.substitute && !skipped && !retired && (
+          {slot.substitute && (
             <button class="btn" onClick={() => swap(exercise.key === slot.exercise.key)}>
               {exercise.key === slot.exercise.key ? `Заменить на «${slot.substitute.name}»` : `Вернуть «${slot.exercise.name}»`}
             </button>
           )}
-          {slot.skippable && !skipped && <button class="btn" onClick={() => skip(true)}>Пропустить</button>}
         </div>
         {tech && exercise.technique && <div class="technique">{exercise.technique}</div>}
       </div>
 
-      {skipped ? (
-        <div class="skipped">
-          <p style="margin-top:0">Упражнение пропущено в этой тренировке.</p>
-          <button class="btn" onClick={() => skip(false)}>Вернуть</button>
-        </div>
-      ) : (
-        <>
+      <>
           {hint && <div class={`hint ${hintClass(hint)}`}>{hint.hint}</div>}
-          {prev && pastText(prev.past, slot.unit) && (
-            <div class="prev num">Прошлый раз (нед. {prev.week}): {pastText(prev.past, slot.unit)}</div>
+          {prev && pastText(prev.past) && (
+            <div class="prev num">Прошлый раз (нед. {prev.week}): {pastText(prev.past)}</div>
           )}
           <div class="sets">
             {rows.map((r) => (
@@ -209,10 +192,10 @@ export function Workout({ id }: { id: number }) {
                   <div class="set-no num">{r.index}</div>
                   <Stepper label={`Подход ${r.index}, вес`} value={r.weight} step={settings.steps[exercise.equipment]} unit="кг" onChange={(v) => patchSet(r, { weight: v })} />
                   <Stepper
-                    label={`Подход ${r.index}, ${slot.unit === 'sec' ? 'секунды' : 'повторения'}`}
+                    label={`Подход ${r.index}, повторения`}
                     value={r.value}
-                    step={slot.unit === 'sec' ? 5 : 1}
-                    unit={slot.unit === 'sec' ? 'сек' : 'повт'}
+                    step={1}
+                    unit="повт"
                     onChange={(v) => patchSet(r, { value: v })}
                   />
                   <button class={`check ${r.done ? 'on' : ''}`} aria-pressed={r.done} aria-label={`Подход ${r.index} выполнен`} onClick={() => toggleDone(r)}>
@@ -233,8 +216,7 @@ export function Workout({ id }: { id: number }) {
               </div>
             ))}
           </div>
-        </>
-      )}
+      </>
 
       <div class="dock">
         <div class="dock-inner">
@@ -261,14 +243,13 @@ export function Workout({ id }: { id: number }) {
         <Sheet title="Упражнения" onClose={() => setSheet(null)}>
           <div class="toc">
             {slots.map((s, i) => {
-              const sk = data.skips.some((x) => x.slotId === s.id);
               const d = doneCount(s.id);
               const t = totalCount(s.id);
               const name = exerciseByKey(data.sets.find((x) => x.slotId === s.id)?.exerciseKey ?? s.id).exercise.name;
               return (
                 <button class={`item ${i === idx ? 'cur' : ''} ${t && d === t ? 'full' : ''}`} onClick={() => { setIdx(i); setSheet(null); }}>
                   <span>{i + 1}. {name}</span>
-                  <span class="num">{sk ? 'пропущено' : `${d}/${t}`}</span>
+                  <span class="num">{`${d}/${t}`}</span>
                 </button>
               );
             })}

@@ -28,6 +28,7 @@ export function Today() {
   const { cycle, sessions, tonnages, open, settings, anySessions } = data;
 
   const label = weekLabel(cycle.currentWeek, cycle.number);
+  const dayOf = getDay;
   const byDay = new Map(sessions.map((s) => [s.day, s]));
   const doneDays = sessions.filter((s) => s.finishedAt).map((s) => s.day);
   const next = suggestDay(doneDays, new Date().getDay());
@@ -59,8 +60,8 @@ export function Today() {
   }
 
   const setsFor = (day: DayId) => {
-    const d = getDay(day);
-    return d.slots.reduce((n, s) => n + plannedSets(d, s, cycle.currentWeek, cycle.number), 0);
+    const d = dayOf(day);
+    return d.slots.reduce((n, s) => n + plannedSets(s, cycle.currentWeek, cycle.number), 0);
   };
 
   return (
@@ -75,7 +76,7 @@ export function Today() {
       <div class="card">
         <div class="spread">
           <div>
-            <div class="muted small">Цикл {cycle.number}</div>
+            <div class="muted small">Цикл {cycle.number} · фулбоди 3 дня</div>
             <div style="font-size:24px;font-weight:800">Неделя {cycle.currentWeek} из {WEEKS}</div>
           </div>
           {label && <span class="chip accent">{label}</span>}
@@ -102,13 +103,13 @@ export function Today() {
       ) : (
         <div style="margin-top:14px">
           {open ? (
-            <a class="btn primary big block" href={`#/w/${open.id}`}>Продолжить: {getDay(open.day).title}</a>
+            <a class="btn primary big block" href={`#/w/${open.id}`}>Продолжить: {dayOf(open.day).title}</a>
           ) : next ? (
             <button class="btn primary big block" disabled={busy} onClick={() => begin(next)}>
               <span style="display:flex;flex-direction:column;line-height:1.2">
-                <span>Начать: {getDay(next).title}</span>
+                <span>Начать: {dayOf(next).title}</span>
                 <span style="font-size:13px;font-weight:600;opacity:.75">
-                  {plural(getDay(next).slots.length, ['упражнение', 'упражнения', 'упражнений'])} · {plural(setsFor(next), SETS)}
+                  {plural(dayOf(next).slots.length, ['упражнение', 'упражнения', 'упражнений'])} · {plural(setsFor(next), SETS)}
                 </span>
               </span>
             </button>

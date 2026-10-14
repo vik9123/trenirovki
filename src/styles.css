@@ -167,7 +167,6 @@ button { cursor: pointer; }
 .stepper .val small { font-size: 11px; color: var(--faint); }
 .stepper input { width: 100%; height: 100%; border: 0; background: var(--surface-3); text-align: center; font-size: 22px; font-weight: 700; outline: none; }
 
-.skipped { margin-top: 14px; padding: 24px 16px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); }
 
 .dock {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;

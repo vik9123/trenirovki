@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import { slotIdForKey, type DayId } from '../program';
+import type { DayId } from '../program';
 import type { Steps } from '../logic/progression';
 
 export type Back = 'ok' | 'ache' | 'pain';
@@ -34,18 +34,12 @@ export interface SetRow {
   exerciseKey: string;
   index: number;
   weight: number;
-  /** Повторения или секунды. */
+  /** Повторения (на одну сторону — для упражнений на одну ногу или руку). */
   value: number;
   /** Запас повторений: 0, 1, 2, 3 (= «3+»). */
   rir?: number;
   pain: boolean;
   done: boolean;
-}
-
-export interface SkipRow {
-  id?: number;
-  sessionId: number;
-  slotId: string;
 }
 
 export interface BodyweightRow {
@@ -65,41 +59,27 @@ export class JournalDB extends Dexie {
   cycles!: EntityTable<CycleRow, 'id'>;
   sessions!: EntityTable<SessionRow, 'id'>;
   sets!: EntityTable<SetRow, 'id'>;
-  skips!: EntityTable<SkipRow, 'id'>;
   bodyweight!: EntityTable<BodyweightRow, 'id'>;
   settings!: EntityTable<SettingsRow, 'id'>;
 
   constructor(name = 'trenirovki') {
     super(name);
-    this.version(1).stores({
-      cycles: '++id, number',
-      sessions: '++id, cycleId, [cycleId+week], startedAt',
-      sets: '++id, sessionId, exerciseKey, slotId',
-      skips: '++id, sessionId',
-      bodyweight: '++id, &date',
-      settings: 'id',
-    });
-    // v2 (28.09.2026): id слота больше не номер места в дне, а ключ упражнения.
-    // Индексы те же — переписываем slotId у записей по их exerciseKey.
-    this.version(2)
-      .stores({})
-      .upgrade((tx) =>
-        tx
-          .table<SetRow>('sets')
-          .toCollection()
-          .modify((r) => {
-            r.slotId = normalizeSlotId(r);
-          }),
-      );
-  }
-}
-
-/** Постоянный id слота для записи подхода (у записей до v2 там был номер места в дне). */
-export function normalizeSlotId(r: Pick<SetRow, 'slotId' | 'exerciseKey'>): string {
-  try {
-    return slotIdForKey(r.exerciseKey);
-  } catch {
-    return r.slotId;
+    // v3 (14.10.2026): журнал начинается с нуля под программу «Фулбоди 3 дня».
+    // Прежние циклы и тренировки стираются; вес тела и настройки сохраняются.
+    this.version(3)
+      .stores({
+        cycles: '++id, number',
+        sessions: '++id, cycleId, [cycleId+week], startedAt',
+        sets: '++id, sessionId, exerciseKey, slotId',
+        skips: null,
+        bodyweight: '++id, &date',
+        settings: 'id',
+      })
+      .upgrade(async (tx) => {
+        await tx.table('sets').clear();
+        await tx.table('sessions').clear();
+        await tx.table('cycles').clear();
+      });
   }
 }
 
