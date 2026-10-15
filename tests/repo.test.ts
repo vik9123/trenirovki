@@ -109,7 +109,7 @@ describe('подсказки из истории', () => {
 
   test('замена в четверг ведёт свою историю и запоминается', async () => {
     const id = await repo.startSession('thu', tick(0));
-    await repo.swapExercise(id, 'f3-1arm-row', true);
+    await repo.swapExercise(id, 'f3-1arm-row', 'f3-1arm-row~sub');
     let { sets } = await repo.sessionBundle(id);
     const rows = sets.filter((s) => s.slotId === 'f3-1arm-row');
     expect(rows.every((s) => s.exerciseKey === 'f3-1arm-row~sub')).toBe(true);
@@ -127,11 +127,36 @@ describe('подсказки из истории', () => {
 
   test('вернуть основное упражнение после замены', async () => {
     const id = await repo.startSession('thu', tick(0));
-    await repo.swapExercise(id, 'f3-cable-lat', true);
-    await repo.swapExercise(id, 'f3-cable-lat', false);
+    await repo.swapExercise(id, 'f3-cable-lat', 'f3-cable-lat~sub');
+    await repo.swapExercise(id, 'f3-cable-lat', 'f3-cable-lat');
     const rows = (await repo.sessionBundle(id)).sets.filter((s) => s.slotId === 'f3-cable-lat');
     expect(rows.map((s) => s.exerciseKey)).toEqual(['f3-cable-lat', 'f3-cable-lat', 'f3-cable-lat']);
-    await expect(repo.swapExercise(id, 'f3-reverse-fly', true)).rejects.toThrow();
+    await expect(repo.swapExercise(id, 'f3-reverse-fly', 'f3-reverse-fly~sub')).rejects.toThrow();
+    await expect(repo.swapExercise(id, 'f3-cable-lat', 'f3-1arm-row~sub')).rejects.toThrow();
+  });
+
+  test('жим одной рукой: основное — тренажёр, две замены, у каждой своя история', async () => {
+    const id = await repo.startSession('thu', tick(0));
+    let rows = (await repo.sessionBundle(id)).sets.filter((s) => s.slotId === 'f3-1arm-press');
+    expect(rows.map((s) => s.exerciseKey)).toEqual(['f3-1arm-machine-press', 'f3-1arm-machine-press', 'f3-1arm-machine-press']);
+    await repo.swapExercise(id, 'f3-1arm-press', 'f3-1arm-press');
+    rows = (await repo.sessionBundle(id)).sets.filter((s) => s.slotId === 'f3-1arm-press');
+    expect(rows.every((s) => s.exerciseKey === 'f3-1arm-press')).toBe(true);
+    for (const s of rows) await repo.updateSet(s.id!, { weight: 14, value: 12, done: true });
+    await repo.swapExercise(id, 'f3-1arm-press', 'f3-1arm-press~sub');
+    rows = (await repo.sessionBundle(id)).sets.filter((s) => s.slotId === 'f3-1arm-press');
+    expect(rows.every((s) => s.exerciseKey === 'f3-1arm-press~sub' && s.weight === 0)).toBe(true);
+  });
+
+  test('записи жима гантели от прежней редакции остаются его историей', async () => {
+    const cycle = await repo.getActiveCycle();
+    const old = (await db.sessions.add({ cycleId: cycle.id!, week: 1, day: 'thu', date: '2026-10-15', startedAt: tick(0).getTime(), finishedAt: tick(0).getTime() })) as number;
+    for (let i = 1; i <= 3; i++) {
+      await db.sets.add({ sessionId: old, slotId: 'f3-1arm-press', exerciseKey: 'f3-1arm-press', index: i, weight: 14, value: 13, pain: false, done: true });
+    }
+    expect((await repo.sessionBundle(old)).sets.map((s) => getSlot(s.slotId).order)).toEqual([4, 4, 4]);
+    expect(await repo.exerciseHistory('f3-1arm-press')).toEqual([{ date: '2026-10-15', top: 14, total: 39 }]);
+    expect(await repo.lastPast('f3-1arm-machine-press')).toBeNull();
   });
 
   test('повторное завершение сохраняет самочувствие, не трогая время конца', async () => {

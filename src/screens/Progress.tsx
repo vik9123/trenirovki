@@ -69,7 +69,7 @@ export function Progress() {
           <optgroup label={d.title}>
             {d.slots.flatMap((s) => [
               <option value={s.exercise.key}>{s.exercise.name}</option>,
-              ...(s.substitute ? [<option value={s.substitute.key}>{s.substitute.name} (замена)</option>] : []),
+              ...(s.substitutes ?? []).map((sub) => <option value={sub.key}>{sub.name} (замена)</option>),
             ])}
           </optgroup>
         ))}

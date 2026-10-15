@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { DAYS, exerciseByKey, getDay, getSlot, isKnownKey } from '../src/program';
 
-// Эталон — таблицы «Программа тренировок 2026-27 3 дня.docx».
+// Эталон — таблицы «Программа тренировок 2026-27 3 дня.docx» (редакция 15.10.2026).
 const DOC: Record<string, [string, number, number, number, number][]> = {
   tue: [
     ['Подтягивания с весом', 4, 6, 8, 90],
@@ -13,10 +13,10 @@ const DOC: Record<string, [string, number, number, number, number][]> = {
     ['Сгибание ног лёжа', 3, 10, 12, 60],
   ],
   thu: [
-    ['Боковой подъём на тумбу', 4, 10, 12, 45],
-    ['Румынская тяга на одной ноге', 4, 10, 12, 45],
+    ['Боковой подъём на тумбу', 4, 12, 15, 45],
+    ['Румынская тяга на одной ноге', 4, 12, 15, 45],
     ['Подъёмы на носок на одной ноге стоя', 3, 12, 15, 30],
-    ['Жим гантели одной рукой лёжа на горизонтальной', 4, 12, 15, 30],
+    ['Жим в тренажёре одной рукой', 4, 12, 15, 30],
     ['Тяга гантели одной рукой с упором в скамью', 4, 12, 15, 30],
     ['Разведения на нижнем блоке одной рукой', 3, 15, 15, 30],
     ['Обратные разведения в тренажёре', 3, 15, 15, 45],
@@ -52,10 +52,11 @@ describe('программа: фулбоди 3 дня', () => {
     expect(perDay.reduce((a, b) => a + b)).toBe(76);
   });
 
-  test('id слота = ключ основного упражнения; ключи уникальны, включая замены', () => {
+  test('id слота = ключ основного упражнения (кроме жима одной рукой); ключи уникальны, включая замены', () => {
     const slots = DAYS.flatMap((d) => d.slots);
-    slots.forEach((s) => expect(s.exercise.key).toBe(s.id));
-    const keys = slots.flatMap((s) => [s.exercise.key, ...(s.substitute ? [s.substitute.key] : [])]);
+    slots.filter((s) => s.id !== 'f3-1arm-press').forEach((s) => expect(s.exercise.key).toBe(s.id));
+    const keys = slots.flatMap((s) => [s.exercise.key, ...(s.substitutes ?? []).map((x) => x.key)]);
+    expect(new Set(slots.map((s) => s.id)).size).toBe(slots.length);
     expect(new Set(keys).size).toBe(keys.length);
     keys.forEach((k) => {
       expect(isKnownKey(k)).toBe(true);
@@ -68,13 +69,22 @@ describe('программа: фулбоди 3 дня', () => {
   });
 
   test('замены в четверг — кнопками, как в документе', () => {
-    const subs = DAYS.flatMap((d) => d.slots).filter((s) => s.substitute).map((s) => [s.id, s.substitute!.name, s.substitute!.equipment]);
+    const subs = DAYS.flatMap((d) => d.slots).flatMap((s) => (s.substitutes ?? []).map((x) => [s.id, x.key, x.name, x.equipment]));
     expect(subs).toEqual([
-      ['f3-1arm-press', 'Сведения в кроссовере одной рукой', 'machine'],
-      ['f3-1arm-row', 'Тяга блока одной рукой (нижнего сидя или верхнего)', 'machine'],
-      ['f3-cable-lat', 'Разведения гантелью одной рукой с наклоном в сторону', 'dumbbell'],
+      ['f3-1arm-press', 'f3-1arm-press', 'Жим гантели одной рукой лёжа на горизонтальной', 'dumbbell'],
+      ['f3-1arm-press', 'f3-1arm-press~sub', 'Сведения в кроссовере одной рукой', 'machine'],
+      ['f3-1arm-row', 'f3-1arm-row~sub', 'Тяга блока одной рукой (нижнего сидя или верхнего)', 'machine'],
+      ['f3-cable-lat', 'f3-cable-lat~sub', 'Разведения гантелью одной рукой с наклоном в сторону', 'dumbbell'],
     ]);
-    expect(exerciseByKey('f3-1arm-press~sub').slot.id).toBe('f3-1arm-press');
+  });
+
+  test('15.10: жим одной рукой — в тренажёре; жим гантели стал заменой и сохранил ключ и записи', () => {
+    const press = getSlot('f3-1arm-press');
+    expect(press.exercise).toMatchObject({ key: 'f3-1arm-machine-press', name: 'Жим в тренажёре одной рукой', equipment: 'machine', perSide: 'arm' });
+    expect(exerciseByKey('f3-1arm-machine-press').slot).toBe(press);
+    expect(exerciseByKey('f3-1arm-press')).toMatchObject({ slot: press, exercise: { equipment: 'dumbbell' } });
+    expect(exerciseByKey('f3-1arm-press~sub').slot).toBe(press);
+    expect(press.exercise.technique).toContain('Начинайте со слабой руки');
   });
 
   test('разведения: повторения до 20, потом вес', () => {

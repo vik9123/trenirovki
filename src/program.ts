@@ -17,7 +17,7 @@ export interface Exercise {
 }
 
 export interface Slot {
-  /** Постоянный id = ключ основного упражнения; не зависит от места в дне. */
+  /** Постоянный id слота; обычно = ключ основного упражнения, не зависит от места в дне. */
   id: string;
   day: DayId;
   order: number;
@@ -28,7 +28,8 @@ export interface Slot {
   /** До скольких повторений растить, прежде чем прибавлять вес (разведения — до 20). */
   progressTo?: number;
   restSec: number;
-  substitute?: Exercise;
+  /** Замены из документа — по кнопке «Заменить на…». У каждой своя история. */
+  substitutes?: Exercise[];
 }
 
 export interface Day {
@@ -70,8 +71,10 @@ const T = {
     'Свободной рукой держитесь за стойку, гантель в другой руке. Спина прямая, таз назад, опорное колено слегка согнуто. Вес — одной гантели, повторения — на одну ногу.',
   singleLegCalf:
     'Носок на краю ступеньки или блина, гантель в руке со стороны рабочей ноги, другой рукой держитесь за стойку. Внизу пауза 1-2 секунды в растяжении, вверху — на самый носок. Вес — одной гантели, повторения — на одну ногу.',
+  oneArmMachinePress:
+    'Спинка так, чтобы рукоять была на уровне середины груди. Свободной рукой держитесь за рукоять или сиденье, корпус не разворачиваете в сторону рабочей руки. Начинайте со слабой руки. Вес на тренажёре, повторения — на одну руку. Тренажёр занят — «Заменить» на жим гантели одной рукой лёжа или сведения в кроссовере одной рукой.',
   oneArmPress:
-    'Вторая рука держится за край скамьи, корпус не заваливается в сторону гантели. Вес примерно как одна гантель в обычном жиме лёжа, минус 2-4 кг. Повторения — на одну руку. Занята скамья — «Заменить» на сведения в кроссовере одной рукой.',
+    'Вторая рука держится за край скамьи, корпус не заваливается в сторону гантели. Вес примерно как одна гантель в обычном жиме лёжа, минус 2-4 кг. Повторения — на одну руку.',
   oneArmRow:
     'Колено и рука той же стороны на скамье, спина параллельно полу. Тянете локтем к поясу, корпус не поворачиваете. Повторения — на одну руку. Не идёт — «Заменить» на тягу блока одной рукой.',
   cableRaise:
@@ -102,7 +105,10 @@ type Extra = Partial<Pick<Slot, 'progressTo'>> &
   Pick<Exercise, 'perSide'> & {
     /** Ключ истории упражнения. */
     key: string;
-    substitute?: Omit<Exercise, 'key'>;
+    /** id слота, если отличается от ключа (упражнение в слоте сменилось, записи остались). */
+    slotId?: string;
+    /** Замены; ключ по умолчанию — «ключ~sub», «ключ~sub2»… */
+    substitutes?: (Omit<Exercise, 'key'> & { key?: string })[];
   };
 
 type Row = [
@@ -120,7 +126,7 @@ type Row = [
 function slot(day: DayId, order: number, row: Row): Slot {
   const [name, sets, repMin, repMax, restSec, equipment, muscles, technique, extra] = row;
   const s: Slot = {
-    id: extra.key,
+    id: extra.slotId ?? extra.key,
     day,
     order,
     exercise: {
@@ -137,7 +143,9 @@ function slot(day: DayId, order: number, row: Row): Slot {
     restSec,
   };
   if (extra.progressTo) s.progressTo = extra.progressTo;
-  if (extra.substitute) s.substitute = { key: `${extra.key}~sub`, ...extra.substitute };
+  if (extra.substitutes) {
+    s.substitutes = extra.substitutes.map((sub, i) => ({ ...sub, key: sub.key ?? `${extra.key}~sub${i ? i + 1 : ''}` }));
+  }
   return s;
 }
 
@@ -158,20 +166,24 @@ export const DAYS: Day[] = [
   ]),
   day('thu', 'Четверг — фулбоди, лёгкий, на одну сторону', 'Чт', 'light', LIGHT,
     [...WARMUP_BASE, 'Четверг: перед боковым подъёмом — 10 подъёмов на тумбу без веса на каждую ногу и 10 наклонов на одной ноге без гантели, держась за стойку.'], [
-    ['Боковой подъём на тумбу', 4, 10, 12, 45, 'dumbbell', 'квадрицепс, средняя ягодичная', T.stepUp, { key: 'f3-stepup', perSide: 'leg' }],
-    ['Румынская тяга на одной ноге', 4, 10, 12, 45, 'dumbbell', 'бицепс бедра, ягодицы', T.singleLegRdl, { key: 'f3-sl-rdl', perSide: 'leg' }],
+    ['Боковой подъём на тумбу', 4, 12, 15, 45, 'dumbbell', 'квадрицепс, средняя ягодичная', T.stepUp, { key: 'f3-stepup', perSide: 'leg' }],
+    ['Румынская тяга на одной ноге', 4, 12, 15, 45, 'dumbbell', 'бицепс бедра, ягодицы', T.singleLegRdl, { key: 'f3-sl-rdl', perSide: 'leg' }],
     ['Подъёмы на носок на одной ноге стоя', 3, 12, 15, 30, 'dumbbell', 'икроножная, камбаловидная', T.singleLegCalf, { key: 'f3-sl-calf', perSide: 'leg' }],
-    ['Жим гантели одной рукой лёжа на горизонтальной', 4, 12, 15, 30, 'dumbbell', 'грудь, передняя дельта, мышцы корпуса', T.oneArmPress, {
-      key: 'f3-1arm-press', perSide: 'arm',
-      substitute: { name: 'Сведения в кроссовере одной рукой', equipment: 'machine', muscles: 'грудь', perSide: 'arm', technique: 'Замена жима гантели одной рукой. Вес на блоке, повторения — на одну руку.' },
+    // С 15.10.2026 основное — жим в тренажёре; жим гантели стал заменой и сохранил свой ключ и записи.
+    ['Жим в тренажёре одной рукой', 4, 12, 15, 30, 'machine', 'грудь, передняя дельта', T.oneArmMachinePress, {
+      key: 'f3-1arm-machine-press', slotId: 'f3-1arm-press', perSide: 'arm',
+      substitutes: [
+        { key: 'f3-1arm-press', name: 'Жим гантели одной рукой лёжа на горизонтальной', equipment: 'dumbbell', muscles: 'грудь, передняя дельта, мышцы корпуса', perSide: 'arm', technique: T.oneArmPress },
+        { key: 'f3-1arm-press~sub', name: 'Сведения в кроссовере одной рукой', equipment: 'machine', muscles: 'грудь', perSide: 'arm', technique: 'Замена жима одной рукой. Вес на блоке, повторения — на одну руку.' },
+      ],
     }],
     ['Тяга гантели одной рукой с упором в скамью', 4, 12, 15, 30, 'dumbbell', 'широчайшие, середина спины, задняя дельта', T.oneArmRow, {
       key: 'f3-1arm-row', perSide: 'arm',
-      substitute: { name: 'Тяга блока одной рукой (нижнего сидя или верхнего)', equipment: 'machine', muscles: 'спина', perSide: 'arm', technique: 'Замена тяги гантели одной рукой. Вес на блоке, повторения — на одну руку.' },
+      substitutes: [{ name: 'Тяга блока одной рукой (нижнего сидя или верхнего)', equipment: 'machine', muscles: 'спина', perSide: 'arm', technique: 'Замена тяги гантели одной рукой. Вес на блоке, повторения — на одну руку.' }],
     }],
     ['Разведения на нижнем блоке одной рукой', 3, 15, 15, 30, 'machine', 'средняя дельта', T.cableRaise, {
       key: 'f3-cable-lat', perSide: 'arm', progressTo: 20,
-      substitute: { name: 'Разведения гантелью одной рукой с наклоном в сторону', equipment: 'dumbbell', muscles: 'средняя дельта', perSide: 'arm', technique: 'Держитесь за стойку, корпус наклонён в сторону от рабочей руки. Вес — одной гантели, повторения — на одну руку.' },
+      substitutes: [{ name: 'Разведения гантелью одной рукой с наклоном в сторону', equipment: 'dumbbell', muscles: 'средняя дельта', perSide: 'arm', technique: 'Держитесь за стойку, корпус наклонён в сторону от рабочей руки. Вес — одной гантели, повторения — на одну руку.' }],
     }],
     ['Обратные разведения в тренажёре', 3, 15, 15, 45, 'machine', 'задняя дельта', T.reverseFly, { key: 'f3-reverse-fly', progressTo: 20 }],
   ]),
@@ -192,7 +204,7 @@ const SLOTS = new Map(DAYS.flatMap((d) => d.slots).map((s) => [s.id, s]));
 const EXERCISES = new Map<string, { slot: Slot; exercise: Exercise }>();
 for (const s of SLOTS.values()) {
   EXERCISES.set(s.exercise.key, { slot: s, exercise: s.exercise });
-  if (s.substitute) EXERCISES.set(s.substitute.key, { slot: s, exercise: s.substitute });
+  for (const sub of s.substitutes ?? []) EXERCISES.set(sub.key, { slot: s, exercise: sub });
 }
 
 export function getDay(id: DayId): Day {

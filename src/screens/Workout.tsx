@@ -120,8 +120,8 @@ export function Workout({ id }: { id: number }) {
     setData((d) => d && { ...d, ...b });
   }
 
-  async function swap(useSub: boolean) {
-    await repo.swapExercise(id, slot!.id, useSub);
+  async function swap(exerciseKey: string) {
+    await repo.swapExercise(id, slot!.id, exerciseKey);
     await reloadBundle();
   }
 
@@ -171,11 +171,14 @@ export function Workout({ id }: { id: number }) {
         </div>
         <div class="ex-actions">
           {exercise.technique && <button class="btn" onClick={() => setTech(!tech)}>ℹ Техника</button>}
-          {slot.substitute && (
-            <button class="btn" onClick={() => swap(exercise.key === slot.exercise.key)}>
-              {exercise.key === slot.exercise.key ? `Заменить на «${slot.substitute.name}»` : `Вернуть «${slot.exercise.name}»`}
-            </button>
-          )}
+          {slot.substitutes &&
+            [slot.exercise, ...slot.substitutes]
+              .filter((e) => e.key !== exercise.key)
+              .map((e) => (
+                <button class="btn" onClick={() => swap(e.key)}>
+                  {e.key === slot.exercise.key ? `Вернуть «${e.name}»` : `Заменить на «${e.name}»`}
+                </button>
+              ))}
         </div>
         {tech && exercise.technique && <div class="technique">{exercise.technique}</div>}
       </div>

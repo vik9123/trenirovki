@@ -185,13 +185,14 @@ export async function updateSet(id: number, patch: Partial<SetRow>): Promise<voi
   await db.sets.update(id, patch);
 }
 
-/** Переключить слот на замену из документа или обратно. Подходы слота создаются заново. */
-export async function swapExercise(sessionId: number, slotId: string, useSubstitute: boolean): Promise<void> {
+/** Переключить слот на упражнение exerciseKey: основное или одну из замен. Подходы слота создаются заново. */
+export async function swapExercise(sessionId: number, slotId: string, exerciseKey: string): Promise<void> {
   const slot = getSlot(slotId);
-  if (useSubstitute && !slot.substitute) throw new Error('У упражнения нет замены');
+  const allowed = [slot.exercise.key, ...(slot.substitutes ?? []).map((s) => s.key)];
+  if (!allowed.includes(exerciseKey)) throw new Error('Такой замены у упражнения нет');
   const { session, cycle } = await sessionBundle(sessionId);
   await db.sets.where({ sessionId }).filter((s) => s.slotId === slotId).delete();
-  await createSlotRows(session, cycle, slotId, useSubstitute ? slot.substitute!.key : slot.exercise.key);
+  await createSlotRows(session, cycle, slotId, exerciseKey);
 }
 
 export interface Feel {
